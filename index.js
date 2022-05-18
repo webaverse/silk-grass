@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 // import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
-const {useFrame, useMaterials, useProcGen, useLocalPlayer, useMathUtils} = metaversefile;
+const {useFrame, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useMathUtils} = metaversefile;
 
 const localVector = new THREE.Vector3();
 const localQuaternion = new THREE.Quaternion();
@@ -69,11 +69,66 @@ const _makeSilksMesh = () => {
   
   const geometry = createSilksGeometry();
 
+  const displacementMap = new THREE.WebGLRenderTarget(512, 512, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    format: THREE.RGBAFormat,
+    type: THREE.FloatType,
+    stencilBuffer: false,
+  });
+  const displacementMapScene = (() => {
+    const fullScreenQuadGeometry = new THREE.PlaneBufferGeometry(2, 2);
+    const fullscreenVertexShader = `\
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 1.0, 1.0);
+      }
+    `;
+    const fullscreenFragmentShader = `\
+      varying vec2 vUv;
+        
+      void main() {
+        gl_FragColor = vec4(vUv.x, 0., vUv.y, 1.0);
+      }
+    `;
+    const fullscreenMaterial = new THREE.ShaderMaterial({
+      vertexShader: fullscreenVertexShader,
+      fragmentShader: fullscreenFragmentShader,
+      // side: THREE.DoubleSide,
+    });
+    const fullscreenQuadMesh = new THREE.Mesh(fullScreenQuadGeometry, fullscreenMaterial);
+    fullscreenQuadMesh.frustumCulled = false;
+    const scene = new THREE.Scene();
+    scene.add(fullscreenQuadMesh);
+    return scene;
+  })();
+  const _renderDisplacementMap = () => {
+    const renderer = useRenderer();
+    const camera = useCamera();
+
+    {
+      const oldRenderTarget = renderer.getRenderTarget();
+    
+      renderer.setRenderTarget(displacementMap);
+      renderer.clear();
+      renderer.render(displacementMapScene, camera);
+
+      renderer.setRenderTarget(oldRenderTarget);
+    }
+  };
+
   const material = new WebaverseShaderMaterial({
     uniforms: {
       uTime: {
         type: 'f',
         value: 0,
+        needsUpdate: true,
+      },
+      uDisplacementMap: {
+        type: 't',
+        value: displacementMap,
         needsUpdate: true,
       },
     },
@@ -82,9 +137,11 @@ const _makeSilksMesh = () => {
       precision highp int;
 
       uniform float uTime;
+      uniform sampler2D uDisplacementMap;
       attribute vec3 p;
       attribute vec4 q;
       varying vec2 vUv;
+      varying vec2 vUv2;
 
       vec4 quat_from_axis_angle(vec3 axis, float angle) { 
         vec4 qr;
@@ -111,8 +168,9 @@ const _makeSilksMesh = () => {
         
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        
+
         vUv = uv;
+        vUv2 = (p.xz + 5.)/10.;
       }
     `,
     fragmentShader: `\
@@ -122,8 +180,10 @@ const _makeSilksMesh = () => {
       #define PI 3.1415926535897932384626433832795
 
       uniform float uTime;
+      uniform sampler2D uDisplacementMap;
       varying float vOffset;
       varying vec2 vUv;
+      varying vec2 vUv2;
 
       vec3 hueShift( vec3 color, float hueAdjust ){
         const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
@@ -153,10 +213,11 @@ const _makeSilksMesh = () => {
       void main() {
         float t = pow(uTime, 0.5)/2. + 0.5;
 
-        gl_FragColor = vec4(hueShift(vec3(1., 0., 0.), vUv.y * PI * 2.), 1.);
+        gl_FragColor = vec4(0., 0., 0., 1.);
+        // gl_FragColor.gb += vUv2;
+        gl_FragColor += texture2D(uDisplacementMap, vUv2);
       }
     `,
-    // side: THREE.DoubleSide,
   });
   const mesh = new THREE.InstancedMesh(geometry, material, numBlades);
   mesh.frustumCulled = false;
@@ -171,6 +232,8 @@ const _makeSilksMesh = () => {
 
     material.uniforms.uTime.value = f;
     material.uniforms.uTime.needsUpdate = true;
+
+    _renderDisplacementMap();
   };
   return mesh;
 };

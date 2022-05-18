@@ -100,7 +100,8 @@ const _makeSilksMesh = () => {
       varying vec2 vUv;
 
       const float range = ${range.toFixed(8)};
-      const float learningRate = 0.05;
+      const float learningRate = 0.005;
+      const float maxDistance = 0.6;
 
       void main() {
         vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
@@ -110,16 +111,19 @@ const _makeSilksMesh = () => {
 
         vec3 oldColor = texture2D(uDisplacementMap, vUv).rgb;
 
-        vec3 newColor = vec3(direction, 1.);
-        float distanceFactor = min(max(1. - distanceToPlayer, 0.), 1.);
+        vec3 newColor = vec3(direction, 0.);
+        float distanceFactor = min(max(maxDistance - distanceToPlayer, 0.), 1.);
         
         float localLearningRate = learningRate;
         if (distanceFactor > 0.0) {
-          localLearningRate *= 4.;
+          localLearningRate = 1.;
         }
+        // gl_FragColor = vec4(newColor * localLearningRate, 1.);
         gl_FragColor = vec4(
-          oldColor * (1. - learningRate) +
-            (newColor * distanceFactor) * localLearningRate,
+          min(max(
+            oldColor * (1. - learningRate) +
+              (newColor * distanceFactor) * localLearningRate,
+          vec3(-1.)), vec3(1.0)),
           1.
         );
       }
@@ -135,7 +139,7 @@ const _makeSilksMesh = () => {
           needsUpdate: false,
         },
         uDisplacementMap: {
-          value: displacementMaps[0],
+          value: displacementMaps[0].texture,
           needsUpdate: false,
         },
       },
@@ -155,7 +159,7 @@ const _makeSilksMesh = () => {
       fullscreenMaterial.uniforms.uWorldPosition.value.setFromMatrixPosition(mesh.matrixWorld);
       fullscreenMaterial.uniforms.uWorldPosition.needsUpdate = true;
 
-      fullscreenMaterial.uniforms.uDisplacementMap.value = displacementMaps[0];
+      fullscreenMaterial.uniforms.uDisplacementMap.value = displacementMaps[0].texture;
       fullscreenMaterial.uniforms.uDisplacementMap.needsUpdate = true;
     };
     return scene;
@@ -234,7 +238,7 @@ const _makeSilksMesh = () => {
         // displacement
         {
           vec3 displacement = texture2D(uDisplacementMap, vUv2).rgb;
-          pos.xz += displacement.xy * pos.y;
+          pos.xz += displacement.xy * pow(pos.y, 0.5) * 0.5;
         }
       
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -301,7 +305,11 @@ const _makeSilksMesh = () => {
     material.uniforms.uDisplacementMap.value = displacementMaps[1].texture;
     material.uniforms.uDisplacementMap.needsUpdate = true;
 
-    [displacementMaps[0], displacementMaps[1]] = [displacementMaps[1], displacementMaps[0]];
+    {
+      const temp = displacementMaps[0];
+      displacementMaps[0] = displacementMaps[1];
+      displacementMaps[1] = temp;
+    }
   };
   return mesh;
 };

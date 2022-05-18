@@ -100,19 +100,28 @@ const _makeSilksMesh = () => {
       varying vec2 vUv;
 
       const float range = ${range.toFixed(8)};
-      const float learningRate = 0.1;
+      const float learningRate = 0.05;
 
       void main() {
         vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
         virtualXZ += uWorldPosition.xz;
         float distanceToPlayer = length(virtualXZ - uPlayerPosition.xz);
-        
-        vec4 oldColor = texture2D(uDisplacementMap, vUv);
+        vec2 direction = distanceToPlayer > 0.0 ? normalize(virtualXZ - uPlayerPosition.xz) : vec2(0.0, 0.0);
 
-        vec3 c = vec3(1.); // vec3(vUv.x, 0., vUv.y);
-        float f = min(max(1. - distanceToPlayer, 0.), 1.);
+        vec3 oldColor = texture2D(uDisplacementMap, vUv).rgb;
+
+        vec3 newColor = vec3(direction, 1.);
+        float distanceFactor = min(max(1. - distanceToPlayer, 0.), 1.);
         
-        gl_FragColor = oldColor * (1. - learningRate) + vec4(c * f, 1.0) * learningRate;
+        float localLearningRate = learningRate;
+        if (distanceFactor > 0.0) {
+          localLearningRate *= 4.;
+        }
+        gl_FragColor = vec4(
+          oldColor * (1. - learningRate) +
+            (newColor * distanceFactor) * localLearningRate,
+          1.
+        );
       }
     `;
     const fullscreenMaterial = new THREE.ShaderMaterial({
@@ -213,17 +222,23 @@ const _makeSilksMesh = () => {
 
       void main() {
         vec3 pos = position;
+        vUv = uv;
+        vUv2 = (p.xz + ${(range).toFixed(8)}) / ${(range * 2).toFixed(8)};
         
+        // instance
         {
           pos = rotate_vertex_position(pos, q);
           pos += p;
-        }        
-        
+        }
+
+        // displacement
+        {
+          vec3 displacement = texture2D(uDisplacementMap, vUv2).rgb;
+          pos.xz += displacement.xy * pos.y;
+        }
+      
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-
-        vUv = uv;
-        vUv2 = (p.xz + ${(range).toFixed(8)}) / ${(range * 2).toFixed(8)};
       }
     `,
     fragmentShader: `\

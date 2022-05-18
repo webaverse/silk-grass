@@ -70,7 +70,7 @@ const _makeSilksMesh = () => {
   
   const geometry = createSilksGeometry();
 
-  const displacementMap = new THREE.WebGLRenderTarget(512, 512, {
+  const _makeRenderTarget = () => new THREE.WebGLRenderTarget(512, 512, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
@@ -79,6 +79,10 @@ const _makeSilksMesh = () => {
     wrapT: THREE.RepeatWrapping,
     stencilBuffer: false,
   });
+  const displacementMaps = [
+    _makeRenderTarget(),
+    _makeRenderTarget(),
+  ];
   const displacementMapScene = (() => {
     const fullScreenQuadGeometry = new THREE.PlaneBufferGeometry(2, 2);
     const fullscreenVertexShader = `\
@@ -92,19 +96,23 @@ const _makeSilksMesh = () => {
     const fullscreenFragmentShader = `\
       uniform vec3 uPlayerPosition;
       uniform vec3 uWorldPosition;
+      uniform sampler2D uDisplacementMap;
       varying vec2 vUv;
 
       const float range = ${range.toFixed(8)};
+      const float learningRate = 0.1;
 
       void main() {
         vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
         virtualXZ += uWorldPosition.xz;
         float distanceToPlayer = length(virtualXZ - uPlayerPosition.xz);
         
+        vec4 oldColor = texture2D(uDisplacementMap, vUv);
+
         vec3 c = vec3(1.); // vec3(vUv.x, 0., vUv.y);
-        float f = min(max(1. - distanceToPlayer * 0.5, 0.), 1.);
+        float f = min(max(1. - distanceToPlayer, 0.), 1.);
         
-        gl_FragColor = vec4(c * f, 1.0);
+        gl_FragColor = oldColor * (1. - learningRate) + vec4(c * f, 1.0) * learningRate;
       }
     `;
     const fullscreenMaterial = new THREE.ShaderMaterial({
@@ -115,6 +123,10 @@ const _makeSilksMesh = () => {
         },
         uWorldPosition: {
           value: new THREE.Vector3(0, 0, 0),
+          needsUpdate: false,
+        },
+        uDisplacementMap: {
+          value: displacementMaps[0],
           needsUpdate: false,
         },
       },
@@ -133,6 +145,9 @@ const _makeSilksMesh = () => {
 
       fullscreenMaterial.uniforms.uWorldPosition.value.setFromMatrixPosition(mesh.matrixWorld);
       fullscreenMaterial.uniforms.uWorldPosition.needsUpdate = true;
+
+      fullscreenMaterial.uniforms.uDisplacementMap.value = displacementMaps[0];
+      fullscreenMaterial.uniforms.uDisplacementMap.needsUpdate = true;
     };
     return scene;
   })();
@@ -148,7 +163,7 @@ const _makeSilksMesh = () => {
       displacementMapScene.update();
 
       // render
-      renderer.setRenderTarget(displacementMap);
+      renderer.setRenderTarget(displacementMaps[1]);
       renderer.clear();
       renderer.render(displacementMapScene, camera);
 
@@ -166,7 +181,7 @@ const _makeSilksMesh = () => {
       },
       uDisplacementMap: {
         type: 't',
-        value: displacementMap.texture,
+        value: displacementMaps[1].texture,
         needsUpdate: true,
       },
     },
@@ -263,14 +278,15 @@ const _makeSilksMesh = () => {
     const maxTime = 3000;
     const f = (timestamp % maxTime) / maxTime;
 
-    // const localPlayer = useLocalPlayer();
-    // _updatePoints(localPlayer, pointsSets);
-    // _setPoints(geometry, pointsSets);
+    _renderDisplacementMap();
 
     material.uniforms.uTime.value = f;
     material.uniforms.uTime.needsUpdate = true;
 
-    _renderDisplacementMap();
+    material.uniforms.uDisplacementMap.value = displacementMaps[1].texture;
+    material.uniforms.uDisplacementMap.needsUpdate = true;
+
+    [displacementMaps[0], displacementMaps[1]] = [displacementMaps[1], displacementMaps[0]];
   };
   return mesh;
 };

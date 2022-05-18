@@ -91,13 +91,14 @@ const _makeSilksMesh = () => {
     `;
     const fullscreenFragmentShader = `\
       uniform vec3 uPlayerPosition;
+      uniform vec3 uWorldPosition;
       varying vec2 vUv;
 
       const float range = ${range.toFixed(8)};
 
       void main() {
         vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
-        virtualXZ.y -= 6.;
+        virtualXZ += uWorldPosition.xz;
         float distanceToPlayer = length(virtualXZ - uPlayerPosition.xz);
         
         vec3 c = vec3(1.); // vec3(vUv.x, 0., vUv.y);
@@ -109,6 +110,10 @@ const _makeSilksMesh = () => {
     const fullscreenMaterial = new THREE.ShaderMaterial({
       uniforms: {
         uPlayerPosition: {
+          value: new THREE.Vector3(0, 0, 0),
+          needsUpdate: false,
+        },
+        uWorldPosition: {
           value: new THREE.Vector3(0, 0, 0),
           needsUpdate: false,
         },
@@ -125,6 +130,9 @@ const _makeSilksMesh = () => {
       const localPlayer = useLocalPlayer();
       fullscreenMaterial.uniforms.uPlayerPosition.value.copy(localPlayer.position);
       fullscreenMaterial.uniforms.uPlayerPosition.needsUpdate = true;
+
+      fullscreenMaterial.uniforms.uWorldPosition.value.setFromMatrixPosition(mesh.matrixWorld);
+      fullscreenMaterial.uniforms.uWorldPosition.needsUpdate = true;
     };
     return scene;
   })();

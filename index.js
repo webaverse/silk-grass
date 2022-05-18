@@ -166,7 +166,7 @@ const _makeSilksMesh = () => {
       },
       uDisplacementMap: {
         type: 't',
-        value: displacementMap,
+        value: displacementMap.texture,
         needsUpdate: true,
       },
     },

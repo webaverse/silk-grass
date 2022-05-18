@@ -20,6 +20,7 @@ const verticesPerHeightSegment = radialSegments + 1;
 const verticesPerPart = verticesPerHeightSegment * (heightSegments + 1);
 const numPointSets = 2;
 const numBlades = 8 * 1024;
+const range = 5;
 
 const createSilkGrassBladeGeometry = () => {
   const geometryNonInstanced = new THREE.CylinderGeometry(
@@ -74,6 +75,8 @@ const _makeSilksMesh = () => {
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
     type: THREE.FloatType,
+    wrapS: THREE.RepeatWrapping,
+    wrapT: THREE.RepeatWrapping,
     stencilBuffer: false,
   });
   const displacementMapScene = (() => {
@@ -87,13 +90,29 @@ const _makeSilksMesh = () => {
       }
     `;
     const fullscreenFragmentShader = `\
+      uniform vec3 uPlayerPosition;
       varying vec2 vUv;
-        
+
+      const float range = ${range.toFixed(8)};
+
       void main() {
-        gl_FragColor = vec4(vUv.x, 0., vUv.y, 1.0);
+        vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
+        virtualXZ.y -= 6.;
+        float distanceToPlayer = length(virtualXZ - uPlayerPosition.xz);
+        
+        vec3 c = vec3(1.); // vec3(vUv.x, 0., vUv.y);
+        float f = min(max(1. - distanceToPlayer * 0.5, 0.), 1.);
+        
+        gl_FragColor = vec4(c * f, 1.0);
       }
     `;
     const fullscreenMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uPlayerPosition: {
+          value: new THREE.Vector3(0, 0, 0),
+          needsUpdate: false,
+        },
+      },
       vertexShader: fullscreenVertexShader,
       fragmentShader: fullscreenFragmentShader,
       // side: THREE.DoubleSide,
@@ -102,6 +121,11 @@ const _makeSilksMesh = () => {
     fullscreenQuadMesh.frustumCulled = false;
     const scene = new THREE.Scene();
     scene.add(fullscreenQuadMesh);
+    scene.update = () => {
+      const localPlayer = useLocalPlayer();
+      fullscreenMaterial.uniforms.uPlayerPosition.value.copy(localPlayer.position);
+      fullscreenMaterial.uniforms.uPlayerPosition.needsUpdate = true;
+    };
     return scene;
   })();
   const _renderDisplacementMap = () => {
@@ -109,12 +133,18 @@ const _makeSilksMesh = () => {
     const camera = useCamera();
 
     {
+      // push state
       const oldRenderTarget = renderer.getRenderTarget();
     
+      // update
+      displacementMapScene.update();
+
+      // render
       renderer.setRenderTarget(displacementMap);
       renderer.clear();
       renderer.render(displacementMapScene, camera);
 
+      // pop state
       renderer.setRenderTarget(oldRenderTarget);
     }
   };
@@ -170,7 +200,7 @@ const _makeSilksMesh = () => {
         gl_Position = projectionMatrix * mvPosition;
 
         vUv = uv;
-        vUv2 = (p.xz + 5.)/10.;
+        vUv2 = (p.xz + ${(range).toFixed(8)}) / ${(range * 2).toFixed(8)};
       }
     `,
     fragmentShader: `\
@@ -214,7 +244,6 @@ const _makeSilksMesh = () => {
         float t = pow(uTime, 0.5)/2. + 0.5;
 
         gl_FragColor = vec4(0., 0., 0., 1.);
-        // gl_FragColor.gb += vUv2;
         gl_FragColor += texture2D(uDisplacementMap, vUv2);
       }
     `,

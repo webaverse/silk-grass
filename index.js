@@ -103,10 +103,33 @@ const _makeSilksMesh = () => {
       const float learningRate = 0.005;
       const float maxDistance = 0.6;
 
+      // optimized distance to line segment function (capsule shape with rounded caps)
+      float distanceToLine(vec3 p, vec3 pointA, vec3 pointB) {
+        vec3 v = pointB - pointA;
+        vec3 w = p - pointA;
+        float c1 = dot(w, v);
+        if (c1 <= 0.0) {
+          return length(p - pointA);
+        }
+        float c2 = dot(v, v);
+        if (c2 <= c1) {
+          return length(p - pointB);
+        }
+        float b = c1 / c2;
+        vec3 pointOnLine = pointA + b * v;
+        return length(p - pointOnLine);
+      }
+
       void main() {
         vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
         virtualXZ += uWorldPosition.xz;
-        float distanceToPlayer = length(virtualXZ - uPlayerPosition.xz);
+        float distanceToPlayer = distanceToLine(
+          vec3(virtualXZ.x, 0., virtualXZ.y),
+          uPlayerPosition,
+          uPlayerPosition + vec3(0., -1.5, 0.)
+        );
+
+        // float distanceToPlayer = length(virtualXZ - uPlayerPosition.xz);
         vec2 direction = distanceToPlayer > 0.0 ? normalize(virtualXZ - uPlayerPosition.xz) : vec2(0.0, 0.0);
 
         vec3 oldColor = texture2D(uDisplacementMap, vUv).rgb;

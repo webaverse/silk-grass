@@ -22,6 +22,16 @@ const openEnded = false;
 const numBlades = 8 * 1024;
 const range = 5;
 
+const fullScreenQuadGeometry = new THREE.PlaneBufferGeometry(2, 2);
+const fullscreenVertexShader = `\
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    gl_Position = vec4(position.xy, 1.0, 1.0);
+  }
+`;
+
 const createSilkGrassBladeGeometry = () => {
   const geometryNonInstanced = new THREE.CylinderGeometry(
     radiusTop,
@@ -66,6 +76,19 @@ function createSilksGeometry() {
   }
   return geometry;
 };
+const _makeCutMesh = () => {
+  // const {WebaverseShaderMaterial} = useMaterials();
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(4 * 3), 3));
+  geometry.setIndex(new THREE.BufferAttribute(Uint16Array.from([0, 1, 2, 2, 1, 3]), 1));
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x0000FF,
+    side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  return mesh;
+};
 const _makeSilksMesh = () => {
   const {WebaverseShaderMaterial} = useMaterials();
   
@@ -85,19 +108,14 @@ const _makeSilksMesh = () => {
     _makeRenderTarget(),
   ];
   const displacementMapScene = (() => {
-    const fullScreenQuadGeometry = new THREE.PlaneBufferGeometry(2, 2);
-    const fullscreenVertexShader = `\
-      varying vec2 vUv;
-
-      void main() {
-        vUv = uv;
-        gl_Position = vec4(position.xy, 1.0, 1.0);
-      }
-    `;
     const fullscreenFragmentShader = `\
       uniform vec3 uPlayerPosition;
       uniform vec3 uWorldPosition;
       uniform sampler2D uDisplacementMap;
+      uniform vec3 pA1;
+      uniform vec3 pA2;
+      uniform vec3 pB1;
+      uniform vec3 pB2;
       varying vec2 vUv;
 
       const float range = ${range.toFixed(8)};
@@ -160,7 +178,6 @@ const _makeSilksMesh = () => {
         if (distanceFactor > 0.0) {
           localLearningRate = 1.;
         }
-        // gl_FragColor = vec4(newColor * localLearningRate, 1.);
         gl_FragColor = vec4(
           min(max(
             oldColor * (1. - learningRate) +
@@ -206,6 +223,107 @@ const _makeSilksMesh = () => {
     };
     return scene;
   })();
+  const displacementMapScene2 = (() => {
+    const fullscreenFragmentShader2 = `\
+      uniform vec3 uWorldPosition;
+      uniform sampler2D uDisplacementMap;
+      uniform vec3 pA1;
+      uniform vec3 pA2;
+      uniform vec3 pB1;
+      uniform vec3 pB2;
+      varying vec2 vUv;
+
+      const float range = ${range.toFixed(8)};
+      const float learningRate = 0.005;
+      const float maxDistance = 0.6;
+
+      bool isPointInTriangle(vec2 point, vec2 a, vec2 b, vec2 c) {
+        vec2 v0 = c - a;
+        vec2 v1 = b - a;
+        vec2 v2 = point - a;
+    
+        float dot00 = dot(v0, v0);
+        float dot01 = dot(v0, v1);
+        float dot02 = dot(v0, v2);
+        float dot11 = dot(v1, v1);
+        float dot12 = dot(v1, v2);
+    
+        float invDenom = 1. / (dot00 * dot11 - dot01 * dot01);
+        float u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+        float v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+    
+        return (u >= 0.) && (v >= 0.) && (u + v < 1.);
+      }
+
+      void main() {
+        vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
+        virtualXZ += uWorldPosition.xz;
+
+        vec4 color = texture2D(uDisplacementMap, vUv);
+
+        vec2 a = pA1.xz;
+        vec2 b = pA2.xz;
+        vec2 c = pB1.xz;
+        vec2 d = pB2.xz;
+        if (isPointInTriangle(virtualXZ, a, b, c) || isPointInTriangle(virtualXZ, b, d, c)) {
+          color.z = (pA1.y + pA2.y + pB1.y + pB2.y) / 4.;
+        }
+        gl_FragColor = color;
+      }
+    `;
+    const fullscreenMaterial2 = new THREE.ShaderMaterial({
+      uniforms: {
+        uWorldPosition: {
+          value: new THREE.Vector3(0, 0, 0),
+          needsUpdate: false,
+        },
+        uDisplacementMap: {
+          value: displacementMaps[0].texture,
+          needsUpdate: false,
+        },
+        pA1: {
+          value: new THREE.Vector3(),
+          needsUpdate: false,
+        },
+        pA2: {
+          value: new THREE.Vector3(),
+          needsUpdate: false,
+        },
+        pB1: {
+          value: new THREE.Vector3(),
+          needsUpdate: false,
+        },
+        pB2: {
+          value: new THREE.Vector3(),
+          needsUpdate: false,
+        },
+      },
+      vertexShader: fullscreenVertexShader,
+      fragmentShader: fullscreenFragmentShader2,
+      // side: THREE.DoubleSide,
+    });
+    const fullscreenQuadMesh2 = new THREE.Mesh(fullScreenQuadGeometry, fullscreenMaterial2);
+    fullscreenQuadMesh2.frustumCulled = false;
+    const scene2 = new THREE.Scene();
+    scene2.add(fullscreenQuadMesh2);
+    scene2.update = (pA1, pA2, pB1, pB2) => {
+      fullscreenMaterial2.uniforms.uWorldPosition.value.setFromMatrixPosition(mesh.matrixWorld);
+      fullscreenMaterial2.uniforms.uWorldPosition.needsUpdate = true;
+
+      fullscreenMaterial2.uniforms.uDisplacementMap.value = displacementMaps[0].texture;
+      fullscreenMaterial2.uniforms.uDisplacementMap.needsUpdate = true;
+
+      fullscreenMaterial2.uniforms.pA1.value.copy(pA1);
+      fullscreenMaterial2.uniforms.pA1.needsUpdate = true;
+      fullscreenMaterial2.uniforms.pA2.value.copy(pA2);
+      fullscreenMaterial2.uniforms.pA2.needsUpdate = true;
+      fullscreenMaterial2.uniforms.pB1.value.copy(pB1);
+      fullscreenMaterial2.uniforms.pB1.needsUpdate = true;
+      fullscreenMaterial2.uniforms.pB2.value.copy(pB2);
+      fullscreenMaterial2.uniforms.pB2.needsUpdate = true;
+    };
+    return scene2;
+  })();
   const _renderDisplacementMap = () => {
     const renderer = useRenderer();
     const camera = useCamera();
@@ -225,6 +343,38 @@ const _makeSilksMesh = () => {
       // pop state
       renderer.setRenderTarget(oldRenderTarget);
     }
+  };
+  const _renderCut = (pA1, pA2, pB1, pB2) => {
+    const renderer = useRenderer();
+    const camera = useCamera();
+
+    {
+      // push state
+      const oldRenderTarget = renderer.getRenderTarget();
+
+      // update
+      displacementMapScene2.update(pA1, pA2, pB1, pB2);
+
+      // render
+      renderer.setRenderTarget(displacementMaps[1]);
+      renderer.clear();
+      renderer.render(displacementMapScene2, camera);
+
+      // pop state
+      renderer.setRenderTarget(oldRenderTarget);
+    }
+  };
+  const _renderMain = f => {
+    material.uniforms.uTime.value = f;
+    material.uniforms.uTime.needsUpdate = true;
+
+    material.uniforms.uDisplacementMap.value = displacementMaps[1].texture;
+    material.uniforms.uDisplacementMap.needsUpdate = true;
+  };
+  const _flipRenderTargets = () => {
+    const temp = displacementMaps[0];
+    displacementMaps[0] = displacementMaps[1];
+    displacementMaps[1] = temp;
   };
 
   const material = new WebaverseShaderMaterial({
@@ -340,38 +490,37 @@ const _makeSilksMesh = () => {
     const f = (timestamp % maxTime) / maxTime;
 
     _renderDisplacementMap();
+    _renderMain(f);
+    _flipRenderTargets();
+  };
 
-    material.uniforms.uTime.value = f;
-    material.uniforms.uTime.needsUpdate = true;
+  // XXX
+  const scene = useScene();
+  const cutMesh = _makeCutMesh();
+  cutMesh.frustumCulled = false;
+  scene.add(cutMesh);
 
-    material.uniforms.uDisplacementMap.value = displacementMaps[1].texture;
-    material.uniforms.uDisplacementMap.needsUpdate = true;
+  mesh.hitAttempt = (position, quaternion) => {
+    const pointA1 = position.clone()
+      .add(new THREE.Vector3(-1, -1.2, -0.1).applyQuaternion(quaternion));
+    const pointA2 = position.clone()
+      .add(new THREE.Vector3(-0.7, -1.2, -1.5).applyQuaternion(quaternion));
+    const pointB1 = position.clone()
+      .add(new THREE.Vector3(1, -1.2, -0.1).applyQuaternion(quaternion));
+    const pointB2 = position.clone()
+      .add(new THREE.Vector3(0.7, -1.2, -1.5).applyQuaternion(quaternion));
+    [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
+      point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
+    });
+    cutMesh.geometry.attributes.position.needsUpdate = true;
 
-    {
-      const temp = displacementMaps[0];
-      displacementMaps[0] = displacementMaps[1];
-      displacementMaps[1] = temp;
-    }
+    _renderCut(pointA1, pointA2, pointB1, pointB2);
+    _flipRenderTargets();
   };
   return mesh;
 };
 
-const _makeCutMesh = () => {
-  // const {WebaverseShaderMaterial} = useMaterials();
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(4 * 3), 3));
-  geometry.setIndex(new THREE.BufferAttribute(Uint16Array.from([0, 1, 2, 2, 1, 3]), 1));
-  const material = new THREE.MeshBasicMaterial({
-    color: 0x0000FF,
-    side: THREE.DoubleSide,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
-  return mesh;
-};
-
 export default () => {
-  const scene = useScene();
   const hitManager = useHitManager();
 
   const mesh = _makeSilksMesh();
@@ -379,10 +528,6 @@ export default () => {
   useFrame(({timestamp, timeDiff}) => {
     mesh.update(timestamp, timeDiff);
   });
-
-  const cutMesh = _makeCutMesh();
-  cutMesh.frustumCulled = false;
-  scene.add(cutMesh);
 
   hitManager.addEventListener('hitattempt', e => {
     const {type, args} = e.data;
@@ -393,20 +538,9 @@ export default () => {
         // hitHalfHeight,
         // hitRadius,
       } = args;
-      console.log('draw cut', e.data, position.toArray().join(','), quaternion.toArray().join(','), cutMesh.geometry);
+      // console.log('draw cut', e.data, position.toArray().join(','), quaternion.toArray().join(','), cutMesh.geometry);
 
-      const pointA1 = position.clone()
-        .add(new THREE.Vector3(-1.2, -1, -0.1).applyQuaternion(quaternion));
-      const pointA2 = position.clone()
-        .add(new THREE.Vector3(-0.7, -1, -1.5).applyQuaternion(quaternion));
-      const pointB1 = position.clone()
-        .add(new THREE.Vector3(1.2, -1, -0.1).applyQuaternion(quaternion));
-      const pointB2 = position.clone()
-        .add(new THREE.Vector3(0.7, -1, -1.5).applyQuaternion(quaternion));
-      [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
-        point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
-      });
-      cutMesh.geometry.attributes.position.needsUpdate = true;
+      mesh.hitAttempt(position, quaternion);
     }
   });
   

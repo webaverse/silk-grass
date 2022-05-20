@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 // import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
-const {useFrame, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useMathUtils} = metaversefile;
+const {useFrame, useScene, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useHitManager} = metaversefile;
 
 const localVector = new THREE.Vector3();
 const localQuaternion = new THREE.Quaternion();
@@ -11,14 +11,14 @@ const upVector = new THREE.Vector3(0, 1, 0);
 const radiusTop = 0.01;
 const radiusBottom = radiusTop;
 const height = 0.8;
-const playerCenterRadius = 0.3;
-const radialSegments = 8;
+// const playerCenterRadius = 0.3;
+const radialSegments = 4;
 const heightSegments = 8;
 const openEnded = false;
-const segmentLength = 0.05;
-const verticesPerHeightSegment = radialSegments + 1;
-const verticesPerPart = verticesPerHeightSegment * (heightSegments + 1);
-const numPointSets = 2;
+// const segmentLength = 0.05;
+// const verticesPerHeightSegment = radialSegments + 1;
+// const verticesPerPart = verticesPerHeightSegment * (heightSegments + 1);
+// const numPointSets = 2;
 const numBlades = 8 * 1024;
 const range = 5;
 
@@ -38,6 +38,7 @@ const createSilkGrassBladeGeometry = () => {
   geometry.index = geometryNonInstanced.index;
   return geometry;
 };
+
 function createSilksGeometry() {
   const geometry = createSilkGrassBladeGeometry();
   /* geometry.setAttribute('p', new THREE.InstancedBufferAttribute(new Float32Array(maxParticles * 3), 3));
@@ -354,11 +355,59 @@ const _makeSilksMesh = () => {
   };
   return mesh;
 };
+
+const _makeCutMesh = () => {
+  // const {WebaverseShaderMaterial} = useMaterials();
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(4 * 3), 3));
+  geometry.setIndex(new THREE.BufferAttribute(Uint16Array.from([0, 1, 2, 2, 1, 3]), 1));
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x0000FF,
+    side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  return mesh;
+};
+
 export default () => {
+  const scene = useScene();
+  const hitManager = useHitManager();
+
   const mesh = _makeSilksMesh();
 
   useFrame(({timestamp, timeDiff}) => {
     mesh.update(timestamp, timeDiff);
+  });
+
+  const cutMesh = _makeCutMesh();
+  cutMesh.frustumCulled = false;
+  scene.add(cutMesh);
+
+  hitManager.addEventListener('hitattempt', e => {
+    const {type, args} = e.data;
+    if (type === 'sword') {
+      const {
+        position,
+        quaternion,
+        // hitHalfHeight,
+        // hitRadius,
+      } = args;
+      console.log('draw cut', e.data, position.toArray().join(','), quaternion.toArray().join(','), cutMesh.geometry);
+
+      const pointA1 = position.clone()
+        .add(new THREE.Vector3(-1.2, -1, -0.1).applyQuaternion(quaternion));
+      const pointA2 = position.clone()
+        .add(new THREE.Vector3(-0.7, -1, -1.5).applyQuaternion(quaternion));
+      const pointB1 = position.clone()
+        .add(new THREE.Vector3(1.2, -1, -0.1).applyQuaternion(quaternion));
+      const pointB2 = position.clone()
+        .add(new THREE.Vector3(0.7, -1, -1.5).applyQuaternion(quaternion));
+      [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
+        point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
+      });
+      cutMesh.geometry.attributes.position.needsUpdate = true;
+    }
   });
   
   return mesh;

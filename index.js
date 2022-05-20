@@ -120,6 +120,24 @@ const _makeSilksMesh = () => {
         return length(p - pointOnLine);
       }
 
+      bool isPointInTriangle(vec2 point, vec2 a, vec2 b, vec2 c) {
+        vec2 v0 = c - a;
+        vec2 v1 = b - a;
+        vec2 v2 = point - a;
+    
+        float dot00 = dot(v0, v0);
+        float dot01 = dot(v0, v1);
+        float dot02 = dot(v0, v2);
+        float dot11 = dot(v1, v1);
+        float dot12 = dot(v1, v2);
+    
+        float invDenom = 1. / (dot00 * dot11 - dot01 * dot01);
+        float u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+        float v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+    
+        return (u >= 0.) && (v >= 0.) && (u + v < 1.);
+      }
+
       void main() {
         vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
         virtualXZ += uWorldPosition.xz;

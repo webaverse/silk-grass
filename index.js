@@ -5,8 +5,29 @@ const {useFrame, useScene, useMaterials, useRenderer, useCamera, useProcGen, use
 
 const localVector = new THREE.Vector3();
 const localQuaternion = new THREE.Quaternion();
+const localVector2D = new THREE.Vector2();
+const localVector2D2 = new THREE.Vector2();
+const localBox2D = new THREE.Box2();
 
 const upVector = new THREE.Vector3(0, 1, 0);
+
+//
+
+const itemletImageUrls = [
+  'noun-fruit-4617781.svg',
+  'noun-poison-4837113.svg',
+  'noun-potion-3097512.svg',
+  'noun-root-4617773.svg',
+].map(name => `/images/items/${name}`);
+const _averagePoints = (points, target) => {
+  target.copy(points[0]);
+  for (let i = 1; i < points.length; i++) {
+    target.add(points[i]);
+  }
+  return target.divideScalar(points.length);
+};
+
+//
 
 const radiusTop = 0.01;
 const radiusBottom = radiusTop;
@@ -623,7 +644,7 @@ const _makeSilksMesh = () => {
   cutMesh.frustumCulled = false;
   scene.add(cutMesh);
 
-  mesh.hitAttempt = (position, quaternion) => {
+  mesh.hitAttempt = (position, quaternion, target) => {
     const pointA1 = position.clone()
       .add(new THREE.Vector3(-1, -1.2, -0.1).applyQuaternion(quaternion));
     const pointA2 = position.clone()
@@ -640,19 +661,74 @@ const _makeSilksMesh = () => {
     const timestamp = performance.now();
     _renderCut(pointA1, pointA2, pointB1, pointB2, timestamp);
     _flipRenderTargets();
+
+    localBox2D.set(
+      localVector2D.set(-range, -range),
+      localVector2D2.set(range, range)
+    );
+    const points = [
+      pointA1,
+      pointA2,
+      pointB1,
+      pointB2,
+    ];
+    if (points.some(point => localBox2D.containsPoint(point))) {
+      return _averagePoints(points, target);
+    } else {
+      return null;
+    }
   };
   return mesh;
 };
 
-export default () => {
+export default e => {
+  const scene = useScene();
   const hitManager = useHitManager();
 
   const mesh = _makeSilksMesh();
+
+  let itemletTextures = null;
+  e.waitUntil((async () => {
+    itemletTextures = await Promise.all(itemletImageUrls.map(url => {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = async () => {
+          const imageBitmap = await createImageBitmap(image, {
+            imageOrientation: 'flipY',
+          });
+          const texture = new THREE.Texture(imageBitmap);
+          texture.needsUpdate = true;
+          resolve(texture);
+        };
+        image.onerror = err => {
+          console.warn(err);
+          reject(err);
+        };
+        image.crossOrigin = 'Anonymous';
+        image.src = url;
+      });
+    }));
+  })());
+  const _dropItemlet = position => {
+    const geometry = new THREE.PlaneBufferGeometry(0.3, 0.3);
+    const texture = itemletTextures[Math.floor(Math.random() * itemletTextures.length)];
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+    });
+    const itemletMesh = new THREE.Mesh(geometry, material);
+    itemletMesh.position.copy(position)
+      .add(new THREE.Vector3(0, 1, 0));
+    itemletMesh.frustumCulled = false;
+    scene.add(itemletMesh);
+    itemletMesh.updateMatrixWorld();
+  };
 
   useFrame(({timestamp, timeDiff}) => {
     mesh.update(timestamp, timeDiff);
   });
 
+  // XXX
   hitManager.addEventListener('hitattempt', e => {
     const {type, args} = e.data;
     if (type === 'sword') {
@@ -664,7 +740,10 @@ export default () => {
       } = args;
       // console.log('draw cut', e.data, position.toArray().join(','), quaternion.toArray().join(','), cutMesh.geometry);
 
-      mesh.hitAttempt(position, quaternion);
+      const hitTarget = mesh.hitAttempt(position, quaternion, localVector);
+      if (hitTarget) {
+        _dropItemlet(hitTarget);
+      }
     }
   });
   

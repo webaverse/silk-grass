@@ -263,7 +263,7 @@ const _makeSilksMesh = () => {
     
         return (u >= 0.) && (v >= 0.) && (u + v < 1.);
       }
-
+      
       void main() {
         vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
         virtualXZ += uWorldPosition.xz;
@@ -335,12 +335,14 @@ const _makeSilksMesh = () => {
   })();
   const _renderDisplacementMap = () => {
     const renderer = useRenderer();
+    const context = renderer.getContext();
     const camera = useCamera();
 
     {
       // push state
       const oldRenderTarget = renderer.getRenderTarget();
-    
+      context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
+
       // update
       displacementMapScene.update();
 
@@ -351,15 +353,18 @@ const _makeSilksMesh = () => {
 
       // pop state
       renderer.setRenderTarget(oldRenderTarget);
+      context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
     }
   };
   const _renderCut = (pA1, pA2, pB1, pB2) => {
     const renderer = useRenderer();
+    const context = renderer.getContext();
     const camera = useCamera();
 
     {
       // push state
       const oldRenderTarget = renderer.getRenderTarget();
+      context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
 
       // update
       displacementMapScene2.update(pA1, pA2, pB1, pB2);
@@ -371,6 +376,7 @@ const _makeSilksMesh = () => {
 
       // pop state
       renderer.setRenderTarget(oldRenderTarget);
+      context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
     }
   };
   const _renderMain = f => {
@@ -426,6 +432,8 @@ const _makeSilksMesh = () => {
         return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
       }
 
+      const float segmentHeight = ${segmentHeight.toFixed(8)};
+
       void main() {
         vec3 pos = position;
         vUv = uv;
@@ -435,6 +443,14 @@ const _makeSilksMesh = () => {
         {
           pos = rotate_vertex_position(pos, q);
           pos += p;
+        }
+
+        float segmentStartY = float(segment) * segmentHeight;
+        float segmentEndY = float(segment + 1) * segmentHeight;
+        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
+        float cutY = displacementColor.z;
+        if (cutY > 0. && cutY < segmentStartY) {
+          pos.y += 0.5;
         }
 
         // displacement

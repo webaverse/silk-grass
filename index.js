@@ -209,7 +209,7 @@ const _makeSilksMesh = () => {
 
         vec4 oldColor = texture2D(uDisplacementMap, vUv);
 
-        vec4 newColor = vec4(direction, oldColor.z, 1.);
+        vec4 newColor = vec4(direction, oldColor.zw);
         float distanceFactor = min(max(maxDistance - distanceToPlayer, 0.), 1.);
         
         float localLearningRate = learningRate;
@@ -270,6 +270,7 @@ const _makeSilksMesh = () => {
     const fullscreenFragmentShader2 = `\
       uniform vec3 uWorldPosition;
       uniform sampler2D uDisplacementMap;
+      uniform float uTime;
       uniform vec3 pA1;
       uniform vec3 pA2;
       uniform vec3 pB1;
@@ -310,6 +311,7 @@ const _makeSilksMesh = () => {
         vec2 d = pB2.xz;
         if (isPointInTriangle(virtualXZ, a, b, c) || isPointInTriangle(virtualXZ, b, d, c)) {
           color.z = (pA1.y + pA2.y + pB1.y + pB2.y) / 4.;
+          color.w = uTime;
         }
         gl_FragColor = color;
       }
@@ -327,6 +329,10 @@ const _makeSilksMesh = () => {
         uNoiseTexture: {
           value: getNoiseTexture(),
           needsUpdate: true,
+        },
+        uTime: {
+          value: 0,
+          needsUpdate: false,
         },
         pA1: {
           value: new THREE.Vector3(),
@@ -353,7 +359,7 @@ const _makeSilksMesh = () => {
     fullscreenQuadMesh2.frustumCulled = false;
     const scene2 = new THREE.Scene();
     scene2.add(fullscreenQuadMesh2);
-    scene2.update = (pA1, pA2, pB1, pB2) => {
+    scene2.update = (pA1, pA2, pB1, pB2, timestamp) => {
       fullscreenMaterial2.uniforms.uWorldPosition.value.setFromMatrixPosition(mesh.matrixWorld);
       fullscreenMaterial2.uniforms.uWorldPosition.needsUpdate = true;
 
@@ -368,6 +374,10 @@ const _makeSilksMesh = () => {
       fullscreenMaterial2.uniforms.pB1.needsUpdate = true;
       fullscreenMaterial2.uniforms.pB2.value.copy(pB2);
       fullscreenMaterial2.uniforms.pB2.needsUpdate = true;
+
+      const timestampS = timestamp / 1000;
+      fullscreenMaterial2.uniforms.uTime.value = timestampS;
+      fullscreenMaterial2.uniforms.uTime.needsUpdate = true;
     };
     return scene2;
   })();
@@ -377,12 +387,12 @@ const _makeSilksMesh = () => {
     const camera = useCamera();
 
     {
+      // update
+      displacementMapScene.update();
+
       // push state
       const oldRenderTarget = renderer.getRenderTarget();
       context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
-
-      // update
-      displacementMapScene.update();
 
       // render
       renderer.setRenderTarget(displacementMaps[1]);
@@ -394,18 +404,18 @@ const _makeSilksMesh = () => {
       context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
     }
   };
-  const _renderCut = (pA1, pA2, pB1, pB2) => {
+  const _renderCut = (pA1, pA2, pB1, pB2, timestamp) => {
     const renderer = useRenderer();
     const context = renderer.getContext();
     const camera = useCamera();
 
     {
+      // update
+      displacementMapScene2.update(pA1, pA2, pB1, pB2, timestamp);
+      
       // push state
       const oldRenderTarget = renderer.getRenderTarget();
       context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
-
-      // update
-      displacementMapScene2.update(pA1, pA2, pB1, pB2);
 
       // render
       renderer.setRenderTarget(displacementMaps[1]);
@@ -418,10 +428,8 @@ const _makeSilksMesh = () => {
     }
   };
   const _renderMain = timestamp => {
-    const maxTime = 3000;
-    const f = (timestamp % maxTime) / maxTime;
-
-    material.uniforms.uTime.value = f;
+    const timestampS = timestamp / 1000;
+    material.uniforms.uTime.value = timestampS;
     material.uniforms.uTime.needsUpdate = true;
 
     material.uniforms.uDisplacementMap.value = displacementMaps[1].texture;
@@ -454,6 +462,7 @@ const _makeSilksMesh = () => {
 
       uniform float uTime;
       uniform sampler2D uDisplacementMap;
+      uniform sampler2D uNoiseTexture;
       attribute vec3 p;
       attribute vec4 q;
       attribute int segment;
@@ -478,6 +487,7 @@ const _makeSilksMesh = () => {
       const float segmentHeight = ${segmentHeight.toFixed(8)};
       const float heightSegments = ${heightSegments.toFixed(8)};  
       const float topSegmentY = segmentHeight * heightSegments;
+      const float cutSpeed = 1.;
       void main() {
         vec3 pos = position;
         vUv = uv;
@@ -495,11 +505,14 @@ const _makeSilksMesh = () => {
           vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
 
           pos -= centerOfBlade;
-          vec4 q = quat_from_axis_angle(vec3(1., 0., 0.), uTime * 2. * PI);
+          vec4 q = quat_from_axis_angle(vec3(1., 0., 0.), uTime * 2. * PI * 0.2);
           pos = rotate_vertex_position(pos, q);
           pos += centerOfBlade;
 
-          pos.y += 0.5;
+          vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv2).xz * 2.;
+          vec3 direction = vec3(directionXZ.x, 1., directionXZ.y);
+          float timeDiff = uTime - displacementColor.w;
+          pos += direction * timeDiff * cutSpeed;
         }
 
         // instance offset
@@ -560,12 +573,13 @@ const _makeSilksMesh = () => {
       }
 
       void main() {
-        // float t = pow(uTime, 0.5)/2. + 0.5;
-
         gl_FragColor = vec4(0., 0., 0., 1.);
-        gl_FragColor += texture2D(uDisplacementMap, vUv2);
-        // gl_FragColor.r += mod(uTime, 1.);
-        gl_FragColor.rgb += vNormal * 0.5;
+        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
+
+        gl_FragColor = vec4(displacementColor.rgb, 1.);
+        // gl_FragColor.rgb += vNormal * 0.5;
+
+        gl_FragColor.r += min(uTime - displacementColor.w, 1.);
       }
     `,
   });
@@ -598,7 +612,8 @@ const _makeSilksMesh = () => {
     });
     cutMesh.geometry.attributes.position.needsUpdate = true;
 
-    _renderCut(pointA1, pointA2, pointB1, pointB2);
+    const timestamp = performance.now();
+    _renderCut(pointA1, pointA2, pointB1, pointB2, timestamp);
     _flipRenderTargets();
   };
   return mesh;

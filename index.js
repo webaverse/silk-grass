@@ -169,6 +169,7 @@ const _makeSilksMesh = () => {
     _makeRenderTarget(),
     _makeRenderTarget(),
   ];
+  const itemsMap = new Float32Array(range * range);
   const displacementMapScene = (() => {
     const fullscreenFragmentShader = `\
       uniform vec3 uPlayerPosition;
@@ -662,18 +663,24 @@ const _makeSilksMesh = () => {
     _renderCut(pointA1, pointA2, pointB1, pointB2, timestamp);
     _flipRenderTargets();
 
-    localBox2D.set(
-      localVector2D.set(-range, -range),
-      localVector2D2.set(range, range)
-    );
     const points = [
       pointA1,
       pointA2,
       pointB1,
       pointB2,
     ];
-    if (points.some(point => localBox2D.containsPoint(point))) {
-      return _averagePoints(points, target);
+    const hitCenterPoint = _averagePoints(points, new THREE.Vector3());
+    const localX = Math.floor(hitCenterPoint.x);
+    const localZ = Math.floor(hitCenterPoint.z);    
+
+    const meshWorldPosition = new THREE.Vector3().setFromMatrixPosition(mesh.matrixWorld);
+    const meshWorldMin = meshWorldPosition.clone().add(new THREE.Vector3(-range, 0, -range));
+    const meshWorldMax = meshWorldPosition.clone().add(new THREE.Vector3(range, 0, range));
+    if (
+      localX >= meshWorldMin.x && localZ >= meshWorldMin.z &&
+      localX < meshWorldMax.x && localZ < meshWorldMax.z
+    ) {
+      return target.set(localX - meshWorldMin.x, localZ - meshWorldMin.z);
     } else {
       return null;
     }
@@ -709,7 +716,7 @@ export default e => {
       });
     }));
   })());
-  const _dropItemlet = position => {
+  const _dropItemlet = position2D => {
     const geometry = new THREE.PlaneBufferGeometry(0.3, 0.3);
     const texture = itemletTextures[Math.floor(Math.random() * itemletTextures.length)];
     const material = new THREE.MeshBasicMaterial({
@@ -717,8 +724,9 @@ export default e => {
       transparent: true,
     });
     const itemletMesh = new THREE.Mesh(geometry, material);
-    itemletMesh.position.copy(position)
-      .add(new THREE.Vector3(0, 1, 0));
+    itemletMesh.position.setFromMatrixPosition(mesh.matrixWorld)
+      .add(new THREE.Vector3(-range, 0, -range))
+      .add(new THREE.Vector3(position2D.x, 1, position2D.y));
     itemletMesh.frustumCulled = false;
     scene.add(itemletMesh);
     itemletMesh.updateMatrixWorld();
@@ -740,9 +748,9 @@ export default e => {
       } = args;
       // console.log('draw cut', e.data, position.toArray().join(','), quaternion.toArray().join(','), cutMesh.geometry);
 
-      const hitTarget = mesh.hitAttempt(position, quaternion, localVector);
-      if (hitTarget) {
-        _dropItemlet(hitTarget);
+      const hitTarget2D = mesh.hitAttempt(position, quaternion, localVector2D);
+      if (hitTarget2D) {
+        _dropItemlet(hitTarget2D);
       }
     }
   });

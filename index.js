@@ -28,6 +28,36 @@ const fullscreenVertexShader = `\
   }
 `;
 
+const makeNoiseTexture = (size = 256) => {
+  const procGen = useProcGen();
+  const {alea} = procGen;
+  const rng = alea('noise');
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  const imageData = context.getImageData(0, 0, size, size);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = rng() * 255;
+    data[i + 1] = rng() * 255;
+    data[i + 2] = rng() * 255;
+    data[i + 3] = rng() * 255;
+  }
+  const texture = new THREE.Texture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+};
+const getNoiseTexture = (() => {
+  let noiseTexture = null;
+  return () => {
+    if (!noiseTexture) {
+      noiseTexture = makeNoiseTexture();
+    }
+    return noiseTexture;
+  };
+})();
+
 const createSilkGrassBladeGeometry = () => {
   const geometryNonInstanced = (() => {
     const baseGeometry = new THREE.CylinderGeometry(
@@ -210,6 +240,10 @@ const _makeSilksMesh = () => {
           value: displacementMaps[0].texture,
           needsUpdate: false,
         },
+        uNoiseTexture: {
+          value: getNoiseTexture(),
+          needsUpdate: true,
+        },
       },
       vertexShader: fullscreenVertexShader,
       fragmentShader: fullscreenFragmentShader,
@@ -289,6 +323,10 @@ const _makeSilksMesh = () => {
         uDisplacementMap: {
           value: displacementMaps[0].texture,
           needsUpdate: false,
+        },
+        uNoiseTexture: {
+          value: getNoiseTexture(),
+          needsUpdate: true,
         },
         pA1: {
           value: new THREE.Vector3(),
@@ -379,7 +417,10 @@ const _makeSilksMesh = () => {
       context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
     }
   };
-  const _renderMain = f => {
+  const _renderMain = timestamp => {
+    const maxTime = 3000;
+    const f = (timestamp % maxTime) / maxTime;
+
     material.uniforms.uTime.value = f;
     material.uniforms.uTime.needsUpdate = true;
 
@@ -395,13 +436,15 @@ const _makeSilksMesh = () => {
   const material = new WebaverseShaderMaterial({
     uniforms: {
       uTime: {
-        type: 'f',
         value: 0,
         needsUpdate: true,
       },
       uDisplacementMap: {
-        type: 't',
         value: displacementMaps[1].texture,
+        needsUpdate: true,
+      },
+      uNoiseTexture: {
+        value: getNoiseTexture(),
         needsUpdate: true,
       },
     },
@@ -416,6 +459,7 @@ const _makeSilksMesh = () => {
       attribute int segment;
       varying vec2 vUv;
       varying vec2 vUv2;
+      varying vec3 vNormal;
 
       vec4 quat_from_axis_angle(vec3 axis, float angle) { 
         vec4 qr;
@@ -428,39 +472,53 @@ const _makeSilksMesh = () => {
       }
 
       vec3 rotate_vertex_position(vec3 position, vec4 q) { 
-        vec3 v = position.xyz;
-        return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+        return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
       }
 
       const float segmentHeight = ${segmentHeight.toFixed(8)};
-
+      const float heightSegments = ${heightSegments.toFixed(8)};  
+      const float topSegmentY = segmentHeight * heightSegments;
       void main() {
         vec3 pos = position;
         vUv = uv;
         vUv2 = (p.xz + ${(range).toFixed(8)}) / ${(range * 2).toFixed(8)};
-        
-        // instance
+
+        // check for cut
+        float segmentStartY = float(segment) * segmentHeight;
+        // float segmentEndY = float(segment + 1) * segmentHeight;
+        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
+        float cutY = displacementColor.z;
+        float cutSegmentY = floor(cutY / segmentHeight) * segmentHeight;
+        bool isCut = cutY > 0. && cutY < segmentStartY;
+        if (isCut) {
+          // handle cut
+          vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
+
+          pos -= centerOfBlade;
+          vec4 q = quat_from_axis_angle(vec3(1., 0., 0.), uTime * 2. * PI);
+          pos = rotate_vertex_position(pos, q);
+          pos += centerOfBlade;
+
+          pos.y += 0.5;
+        }
+
+        // instance offset
         {
           pos = rotate_vertex_position(pos, q);
           pos += p;
         }
 
-        float segmentStartY = float(segment) * segmentHeight;
-        float segmentEndY = float(segment + 1) * segmentHeight;
-        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
-        float cutY = displacementColor.z;
-        if (cutY > 0. && cutY < segmentStartY) {
-          pos.y += 0.5;
-        }
-
-        // displacement
-        {
+        if (!isCut) {
+          // handle step displacement
           vec3 displacement = texture2D(uDisplacementMap, vUv2).rgb;
           pos.xz += displacement.xy * pow(pos.y, 0.5) * 0.5;
         }
-      
+
+        // output
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
+        
+        vNormal = normal;
       }
     `,
     fragmentShader: `\
@@ -474,6 +532,7 @@ const _makeSilksMesh = () => {
       varying float vOffset;
       varying vec2 vUv;
       varying vec2 vUv2;
+      varying vec3 vNormal;
 
       vec3 hueShift( vec3 color, float hueAdjust ){
         const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
@@ -501,10 +560,12 @@ const _makeSilksMesh = () => {
       }
 
       void main() {
-        float t = pow(uTime, 0.5)/2. + 0.5;
+        // float t = pow(uTime, 0.5)/2. + 0.5;
 
         gl_FragColor = vec4(0., 0., 0., 1.);
         gl_FragColor += texture2D(uDisplacementMap, vUv2);
+        // gl_FragColor.r += mod(uTime, 1.);
+        gl_FragColor.rgb += vNormal * 0.5;
       }
     `,
   });
@@ -512,11 +573,8 @@ const _makeSilksMesh = () => {
   mesh.frustumCulled = false;
 
   mesh.update = (timestamp, timeDiff) => {
-    const maxTime = 3000;
-    const f = (timestamp % maxTime) / maxTime;
-
     _renderDisplacementMap();
-    _renderMain(f);
+    _renderMain(timestamp);
     _flipRenderTargets();
   };
 

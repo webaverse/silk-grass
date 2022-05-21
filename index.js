@@ -133,12 +133,12 @@ const _makeSilksMesh = () => {
   const geometry = createSilksGeometry();
 
   const _makeRenderTarget = () => new THREE.WebGLRenderTarget(512, 512, {
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
     format: THREE.RGBAFormat,
     type: THREE.FloatType,
-    wrapS: THREE.RepeatWrapping,
-    wrapT: THREE.RepeatWrapping,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
     stencilBuffer: false,
   });
   const displacementMaps = [

@@ -17,6 +17,7 @@ const openEnded = false;
 const segmentHeight = height / heightSegments;
 const numBlades = 8 * 1024;
 const range = 5;
+const cutTime = 1;
 
 const fullScreenQuadGeometry = new THREE.PlaneBufferGeometry(2, 2);
 const fullscreenVertexShader = `\
@@ -299,6 +300,7 @@ const _makeSilksMesh = () => {
         return (u >= 0.) && (v >= 0.) && (u + v < 1.);
       }
       
+      const float cutTime = ${cutTime.toFixed(8)};
       void main() {
         vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
         virtualXZ += uWorldPosition.xz;
@@ -309,7 +311,12 @@ const _makeSilksMesh = () => {
         vec2 b = pA2.xz;
         vec2 c = pB1.xz;
         vec2 d = pB2.xz;
-        if (isPointInTriangle(virtualXZ, a, b, c) || isPointInTriangle(virtualXZ, b, d, c)) {
+        if (
+          (
+            isPointInTriangle(virtualXZ, a, b, c) || isPointInTriangle(virtualXZ, b, d, c)
+          ) &&
+          (uTime - color.w) > cutTime
+        ) {
           color.z = (pA1.y + pA2.y + pB1.y + pB2.y) / 4.;
           color.w = uTime;
         }

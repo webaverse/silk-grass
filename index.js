@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-// import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
 const {useFrame, useScene, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useHitManager} = metaversefile;
 
@@ -11,14 +11,10 @@ const upVector = new THREE.Vector3(0, 1, 0);
 const radiusTop = 0.01;
 const radiusBottom = radiusTop;
 const height = 0.8;
-// const playerCenterRadius = 0.3;
 const radialSegments = 4;
 const heightSegments = 8;
 const openEnded = false;
-// const segmentLength = 0.05;
-// const verticesPerHeightSegment = radialSegments + 1;
-// const verticesPerPart = verticesPerHeightSegment * (heightSegments + 1);
-// const numPointSets = 2;
+const segmentHeight = height / heightSegments;
 const numBlades = 8 * 1024;
 const range = 5;
 
@@ -33,14 +29,26 @@ const fullscreenVertexShader = `\
 `;
 
 const createSilkGrassBladeGeometry = () => {
-  const geometryNonInstanced = new THREE.CylinderGeometry(
-    radiusTop,
-    radiusBottom,
-    height,
-    radialSegments,
-    heightSegments,
-    openEnded,
-  ).translate(0, height/2, 0);
+  const geometryNonInstanced = (() => {
+    const baseGeometry = new THREE.CylinderGeometry(
+      radiusTop,
+      radiusBottom,
+      segmentHeight,
+      radialSegments,
+      1, // heightSegments,
+      openEnded,
+    );
+    baseGeometry.setAttribute('segment', new THREE.BufferAttribute(new Int32Array(baseGeometry.attributes.position.count), 1));
+    const geometries = [];
+    for (let i = 0; i < heightSegments; i++) {
+      const geometry = baseGeometry.clone()
+        .translate(0, segmentHeight/2 + segmentHeight * i, 0);
+      geometry.attributes.segment.array.fill(i);
+      geometries.push(geometry);
+    }
+    const result = BufferGeometryUtils.mergeBufferGeometries(geometries);
+    return result;
+  })();
   const geometry = new THREE.InstancedBufferGeometry();
   for (const k in geometryNonInstanced.attributes) {
     geometry.setAttribute(k, geometryNonInstanced.attributes[k]);
@@ -169,9 +177,9 @@ const _makeSilksMesh = () => {
         // float distanceToPlayer = length(virtualXZ - uPlayerPosition.xz);
         vec2 direction = distanceToPlayer > 0.0 ? normalize(virtualXZ - uPlayerPosition.xz) : vec2(0.0, 0.0);
 
-        vec3 oldColor = texture2D(uDisplacementMap, vUv).rgb;
+        vec4 oldColor = texture2D(uDisplacementMap, vUv);
 
-        vec3 newColor = vec3(direction, 0.);
+        vec4 newColor = vec4(direction, oldColor.z, 1.);
         float distanceFactor = min(max(maxDistance - distanceToPlayer, 0.), 1.);
         
         float localLearningRate = learningRate;
@@ -180,10 +188,11 @@ const _makeSilksMesh = () => {
         }
         gl_FragColor = vec4(
           min(max(
-            oldColor * (1. - learningRate) +
-              (newColor * distanceFactor) * localLearningRate,
-          vec3(-1.)), vec3(1.0)),
-          1.
+            oldColor.xy * (1. - learningRate) +
+              (newColor.xy * distanceFactor) * localLearningRate,
+          vec2(-1.)), vec2(1.)),
+          newColor.z,
+          newColor.w
         );
       }
     `;
@@ -398,6 +407,7 @@ const _makeSilksMesh = () => {
       uniform sampler2D uDisplacementMap;
       attribute vec3 p;
       attribute vec4 q;
+      attribute int segment;
       varying vec2 vUv;
       varying vec2 vUv2;
 

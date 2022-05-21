@@ -479,7 +479,7 @@ const _makeSilksMesh = () => {
       varying vec2 vUv2;
       varying vec3 vNormal;
       varying float vTimeDiff;
-      varying float vIsCut;
+      // varying float vIsCut;
 
       vec4 quat_from_axis_angle(vec3 axis, float angle) { 
         vec4 qr;
@@ -509,17 +509,18 @@ const _makeSilksMesh = () => {
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
         vTimeDiff = uTime - displacementColor.w;
 
-        // check for cut
+        // cut handling
         float segmentStartY = float(segment) * segmentHeight;
         float cutY = displacementColor.z;
         float cutSegmentY = floor(cutY / segmentHeight) * segmentHeight;
         bool isCut = (cutY > 0. && cutY < segmentStartY) &&
           (vTimeDiff < cutTime);
         if (isCut) {
-          // handle cut
           vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
+          float scale = max(1. - vTimeDiff / cutTime, 0.);
 
           pos -= centerOfBlade;
+          pos.y *= scale;
           vec4 q = quat_from_axis_angle(vec3(1., 0., 0.), uTime * 2. * PI * 0.2);
           pos = rotate_vertex_position(pos, q);
           pos += centerOfBlade;
@@ -528,9 +529,9 @@ const _makeSilksMesh = () => {
           vec3 direction = vec3(directionXZ.x, 1., directionXZ.y);
           pos += direction * vTimeDiff * cutSpeed;
 
-          vIsCut = 1.;
+          // vIsCut = 1.;
         } else {
-          vIsCut = 0.;
+          // vIsCut = 0.;
         }
 
         // instance offset
@@ -539,9 +540,9 @@ const _makeSilksMesh = () => {
           pos += p;
         }
 
+        // displacement bend
         if (!isCut) {
-          // handle step displacement
-          vec3 displacement = texture2D(uDisplacementMap, vUv2).rgb;
+          vec4 displacement = texture2D(uDisplacementMap, vUv2);
           pos.xz += displacement.xy * pow(pos.y, 0.5) * 0.5;
         }
 
@@ -565,7 +566,7 @@ const _makeSilksMesh = () => {
       varying vec2 vUv2;
       varying vec3 vNormal;
       varying float vTimeDiff;
-      varying float vIsCut;
+      // varying float vIsCut;
 
       vec3 hueShift( vec3 color, float hueAdjust ){
         const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
@@ -594,19 +595,18 @@ const _makeSilksMesh = () => {
 
       const float cutTime = ${cutTime.toFixed(8)};
       void main() {
-        gl_FragColor = vec4(0., 0., 0., 1.);
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
 
         gl_FragColor.rgb = displacementColor.rgb;
 
-        if (vIsCut > 0.) {
-          gl_FragColor.a = max(1. - vTimeDiff, 0.);
-        } else {
+        // if (vIsCut > 0.) {
+        //   gl_FragColor.a = max(1. - vTimeDiff, 0.);
+        // } else {
           gl_FragColor.a = 1.;
-        }
+        // }
       }
     `,
-    transparent: true,
+    // transparent: true,
   });
   const mesh = new THREE.InstancedMesh(geometry, material, numBlades);
   mesh.frustumCulled = false;

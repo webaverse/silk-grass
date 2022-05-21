@@ -18,6 +18,8 @@ const segmentHeight = height / heightSegments;
 const numBlades = 8 * 1024;
 const range = 5;
 const cutTime = 1;
+const growTime = 1;
+const cutGrowTime = cutTime + growTime;
 
 const fullScreenQuadGeometry = new THREE.PlaneBufferGeometry(2, 2);
 const fullscreenVertexShader = `\
@@ -476,6 +478,8 @@ const _makeSilksMesh = () => {
       varying vec2 vUv;
       varying vec2 vUv2;
       varying vec3 vNormal;
+      varying float vTimeDiff;
+      varying float vIsCut;
 
       vec4 quat_from_axis_angle(vec3 axis, float angle) { 
         vec4 qr;
@@ -495,18 +499,22 @@ const _makeSilksMesh = () => {
       const float heightSegments = ${heightSegments.toFixed(8)};  
       const float topSegmentY = segmentHeight * heightSegments;
       const float cutSpeed = 1.;
+      const float cutTime = ${cutTime.toFixed(8)};
       void main() {
         vec3 pos = position;
         vUv = uv;
         vUv2 = (p.xz + ${(range).toFixed(8)}) / ${(range * 2).toFixed(8)};
 
+        // time diff
+        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
+        vTimeDiff = uTime - displacementColor.w;
+
         // check for cut
         float segmentStartY = float(segment) * segmentHeight;
-        // float segmentEndY = float(segment + 1) * segmentHeight;
-        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
         float cutY = displacementColor.z;
         float cutSegmentY = floor(cutY / segmentHeight) * segmentHeight;
-        bool isCut = cutY > 0. && cutY < segmentStartY;
+        bool isCut = (cutY > 0. && cutY < segmentStartY) &&
+          (vTimeDiff < cutTime);
         if (isCut) {
           // handle cut
           vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
@@ -518,8 +526,11 @@ const _makeSilksMesh = () => {
 
           vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv2).xz * 2.;
           vec3 direction = vec3(directionXZ.x, 1., directionXZ.y);
-          float timeDiff = uTime - displacementColor.w;
-          pos += direction * timeDiff * cutSpeed;
+          pos += direction * vTimeDiff * cutSpeed;
+
+          vIsCut = 1.;
+        } else {
+          vIsCut = 0.;
         }
 
         // instance offset
@@ -553,6 +564,8 @@ const _makeSilksMesh = () => {
       varying vec2 vUv;
       varying vec2 vUv2;
       varying vec3 vNormal;
+      varying float vTimeDiff;
+      varying float vIsCut;
 
       vec3 hueShift( vec3 color, float hueAdjust ){
         const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
@@ -579,16 +592,21 @@ const _makeSilksMesh = () => {
         return vec3( dot (yIQ, kYIQToR), dot (yIQ, kYIQToG), dot (yIQ, kYIQToB) );
       }
 
+      const float cutTime = ${cutTime.toFixed(8)};
       void main() {
         gl_FragColor = vec4(0., 0., 0., 1.);
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
 
-        gl_FragColor = vec4(displacementColor.rgb, 1.);
-        // gl_FragColor.rgb += vNormal * 0.5;
+        gl_FragColor.rgb = displacementColor.rgb;
 
-        gl_FragColor.r += min(uTime - displacementColor.w, 1.);
+        if (vIsCut > 0.) {
+          gl_FragColor.a = max(1. - vTimeDiff, 0.);
+        } else {
+          gl_FragColor.a = 1.;
+        }
       }
     `,
+    transparent: true,
   });
   const mesh = new THREE.InstancedMesh(geometry, material, numBlades);
   mesh.frustumCulled = false;

@@ -731,6 +731,7 @@ export default e => {
     }));
   })());
 
+  // XXX this should be a type of drop in the drop manager
   const itemletMeshes = [];
   const _dropItemlet = position2D => {
     const geometry = new THREE.PlaneBufferGeometry(dropItemSize, dropItemSize)

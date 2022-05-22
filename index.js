@@ -556,7 +556,6 @@ const _makeSilksMesh = () => {
       const float segmentHeight = ${segmentHeight.toFixed(8)};
       const float heightSegments = ${heightSegments.toFixed(8)};  
       const float topSegmentY = segmentHeight * heightSegments;
-      const float cutSpeed = 1.;
       const float cutTime = ${cutTime.toFixed(8)};
       const float growTime = ${growTime.toFixed(8)};
       const float cutGrowTime = ${cutGrowTime.toFixed(8)};
@@ -578,19 +577,32 @@ const _makeSilksMesh = () => {
         bool isGrow = isCuttableY && (vTimeDiff >= cutTime && vTimeDiff < cutGrowTime);
         if (isCut) {
           vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
-          float scaleFactor = max(1. - vTimeDiff / cutTime, 0.);
+          // float scaleFactor = max(1. - vTimeDiff / cutTime, 0.);
+
+          // compute the splat time
+          const float GRAVITY = -9.8;
+          float a = 0.5 * GRAVITY;
+          float b = 3.;
+          float c = centerOfBlade.y;
+          float splatTime = (-b - sqrt(b * b - 4. * a * c)) / (2. * a);
 
           // scale + rotation
           pos -= centerOfBlade;
-          pos.y *= scaleFactor;
-          vec4 q = quat_from_axis_angle(vec3(1., 0., 0.), uTime * 2. * PI * 0.2);
+          // pos.y *= scaleFactor;
+          vec3 rotationAxis = normalize(-1. + texture2D(uNoiseTexture, vUv2).xyz * 2.);
+          vec4 q = quat_from_axis_angle(rotationAxis, uTime * 2. * PI * 0.2);
           pos = rotate_vertex_position(pos, q);
           pos += centerOfBlade;
 
           // velocity + position
-          vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv2).xz * 2.;
+          vec2 vUv3 = mod(vUv2 * 3., 1.); // to not conflict with rotation axis
+          vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv3).xz * 2.;
           vec3 direction = vec3(directionXZ.x, 1., directionXZ.y);
-          pos += direction * vTimeDiff * cutSpeed;            
+          float cutSpeed = texture2D(uNoiseTexture, vUv2).w * 3.;
+          pos += direction * vTimeDiff * cutSpeed;
+          // apply gravity exponent (-9.8 m/s^2)
+          vec3 gravityVector = vec3(0., GRAVITY * vTimeDiff * vTimeDiff * 0.5, 0.);
+          pos += gravityVector;
         } else if (isGrow) {
           vec3 bottomOfBlade = vec3(0., cutSegmentY * 0.5, 0.);
           float scaleFactor = min((vTimeDiff - cutTime) / growTime, 1.);

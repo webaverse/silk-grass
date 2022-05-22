@@ -20,10 +20,36 @@ const dropItemSize = 0.2;
 
 const itemletImageUrls = [
   'noun-fruit-4617781.svg',
-  'noun-poison-4837113.svg',
-  'noun-potion-3097512.svg',
   'noun-root-4617773.svg',
+  'noun-potion-3097512.svg',
+  'noun-poison-4837113.svg',
 ].map(name => `/images/items/${name}`);
+const colorPalettes = [
+  [ // red
+    0xef5350,
+    0xd32f2f,
+  ],
+  [ // violet
+    0x7e57c2,
+    0x512da8,
+  ],
+  [ // green
+    0x66bb6a,
+    0x388e3c,
+  ],
+  [ // grey
+    0xbdbdbd,
+    0x455a64,
+  ],
+].map(([color1, color2]) => {
+  color1 = new THREE.Color(color1).offsetHSL(0, 0.5, 0);
+  color2 = new THREE.Color(color2).offsetHSL(0, 0.5, 0);
+
+  return [
+    color1.getHex(),
+    color2.getHex(),
+  ]
+});
 const _averagePoints = (points, target) => {
   target.copy(points[0]);
   for (let i = 1; i < points.length; i++) {
@@ -740,7 +766,9 @@ export default e => {
   const _dropItemlet = position2D => {
     const geometry = new THREE.PlaneBufferGeometry(dropItemSize, dropItemSize)
       .translate(0, dropItemSize/2, 0);
-    const texture = itemletTextures[Math.floor(Math.random() * itemletTextures.length)];
+    const index = Math.floor(Math.random() * itemletTextures.length);
+    const texture = itemletTextures[index];
+    const colorPalette = colorPalettes[index];
     const material = new WebaverseShaderMaterial({
       uniforms: {
         cameraBillboardQuaternion: {
@@ -750,7 +778,15 @@ export default e => {
         uTex: {
           value: texture,
           needsUpdate: true,
-        }
+        },
+        color1: {
+          value: new THREE.Color(colorPalette[0]),
+          needsUpdate: true,
+        },
+        color2: {
+          value: new THREE.Color(colorPalette[1]),
+          needsUpdate: true,
+        },
       },
       vertexShader: `\
         uniform vec4 cameraBillboardQuaternion;
@@ -771,14 +807,13 @@ export default e => {
       `,
       fragmentShader: `\
         uniform sampler2D uTex;
+        uniform vec3 color1;
+        uniform vec3 color2;
         varying vec2 vUv;
-
-        vec3 color1 = vec3(${new THREE.Color(0x7e57c2).toArray().join(', ')});
-        vec3 color2 = vec3(${new THREE.Color(0x512da8).toArray().join(', ')});
 
         void main() {
           vec4 displacementColor = texture2D(uTex, vUv);
-          displacementColor.rgb = mix(color1, color2, vUv.y);
+          displacementColor.rgb = mix(color2, color1, vUv.y);
           gl_FragColor = displacementColor;
           if (gl_FragColor.a < 0.1) {
             discard;

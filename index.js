@@ -11,6 +11,7 @@ const localVector2D = new THREE.Vector2();
 const localVector2D2 = new THREE.Vector2();
 const localBox2D = new THREE.Box2();
 
+const zeroVector = new THREE.Vector3(0, 0, 0);
 const upVector = new THREE.Vector3(0, 1, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
 const dropItemSize = 0.2;
@@ -774,6 +775,9 @@ export default e => {
           vec4 displacementColor = texture2D(uTex, vUv);
           displacementColor.rgb = mix(color1, color2, vUv.y);
           gl_FragColor = displacementColor;
+          if (gl_FragColor.a < 0.1) {
+            discard;
+          }
         }
       `,
       side: THREE.DoubleSide,
@@ -786,22 +790,51 @@ export default e => {
     scene.add(itemletMesh);
     itemletMesh.updateMatrixWorld();
 
+    let animation = null;
     itemletMesh.update = (timestamp, timeDiff) => {
       const timeDiffS = timeDiff / 1000;
       const camera = useCamera();
+      const localPlayer = useLocalPlayer();
+
       localEuler.setFromQuaternion(camera.quaternion, 'YXZ');
       localEuler.x = 0;
       localEuler.z = 0;
       itemletMesh.material.uniforms.cameraBillboardQuaternion.value.setFromEuler(localEuler);
       itemletMesh.material.uniforms.cameraBillboardQuaternion.needsUpdate = true;
 
-      itemletMesh.position.add(localVector.copy(itemletMesh.velocity).multiplyScalar(timeDiffS));
-      itemletMesh.velocity.add(localVector.copy(gravity).multiplyScalar(timeDiffS));
-      if (itemletMesh.position.y < 0) {
-        itemletMesh.position.y = 0;
-        itemletMesh.velocity.set(0, 0, 0);
+      if (animation) {
+        const timeDiff = timestamp - animation.startTime;
+        const factor = timeDiff / animation.duration;
+        if (factor < 1) {
+          itemletMesh.position.copy(localPlayer.position);
+          itemletMesh.position.y += 0.2 + Math.sin(Math.min(factor * 4, 1) * Math.PI) * 0.1;
+          itemletMesh.updateMatrixWorld();
+        } else {
+          scene.remove(itemletMesh);
+          itemletMeshes.splice(itemletMeshes.indexOf(itemletMesh), 1);
+        }
+      } else {
+        if (!itemletMesh.velocity.equals(zeroVector)) {
+          itemletMesh.position.add(localVector.copy(itemletMesh.velocity).multiplyScalar(timeDiffS));
+          itemletMesh.velocity.add(localVector.copy(gravity).multiplyScalar(timeDiffS));
+          if (itemletMesh.position.y < 0) {
+            itemletMesh.position.y = 0;
+            itemletMesh.velocity.set(0, 0, 0);
+          }
+          itemletMesh.updateMatrixWorld();
+        } else {
+          const localPosition = localVector.copy(localPlayer.position);
+          localPosition.y -= localPlayer.avatar.height;
+          // console.log('got pos', localPosition.toArray().join(','), itemletMesh.position.toArray().join(','));
+
+          if (localPosition.distanceTo(itemletMesh.position) < 0.5) {
+            animation = {
+              startTime: timestamp,
+              duration: 1000,
+            };
+          }
+        }
       }
-      itemletMesh.updateMatrixWorld();
     };
 
     itemletMeshes.push(itemletMesh);

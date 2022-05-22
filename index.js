@@ -1,15 +1,19 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
+import { WebaverseShaderMaterial } from '../materials';
 const {useFrame, useScene, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useHitManager} = metaversefile;
 
 const localVector = new THREE.Vector3();
 const localQuaternion = new THREE.Quaternion();
+const localEuler = new THREE.Euler();
 const localVector2D = new THREE.Vector2();
 const localVector2D2 = new THREE.Vector2();
 const localBox2D = new THREE.Box2();
 
 const upVector = new THREE.Vector3(0, 1, 0);
+const gravity = new THREE.Vector3(0, -9.8, 0);
+const dropItemSize = 0.2;
 
 //
 
@@ -169,7 +173,6 @@ const _makeSilksMesh = () => {
     _makeRenderTarget(),
     _makeRenderTarget(),
   ];
-  const itemsMap = new Float32Array(range * range);
   const displacementMapScene = (() => {
     const fullscreenFragmentShader = `\
       uniform vec3 uPlayerPosition;
@@ -645,7 +648,8 @@ const _makeSilksMesh = () => {
   cutMesh.frustumCulled = false;
   scene.add(cutMesh);
 
-  mesh.hitAttempt = (position, quaternion, target) => {
+  const cutLastTimestampMap = new Float32Array((range * 2) ** 2);
+  mesh.hitAttempt = (position, quaternion, target2D) => {
     const pointA1 = position.clone()
       .add(new THREE.Vector3(-1, -1.2, -0.1).applyQuaternion(quaternion));
     const pointA2 = position.clone()
@@ -670,17 +674,26 @@ const _makeSilksMesh = () => {
       pointB2,
     ];
     const hitCenterPoint = _averagePoints(points, new THREE.Vector3());
-    const localX = Math.floor(hitCenterPoint.x);
-    const localZ = Math.floor(hitCenterPoint.z);    
+    const relativeX = Math.floor(hitCenterPoint.x);
+    const relativeZ = Math.floor(hitCenterPoint.z);    
 
     const meshWorldPosition = new THREE.Vector3().setFromMatrixPosition(mesh.matrixWorld);
     const meshWorldMin = meshWorldPosition.clone().add(new THREE.Vector3(-range, 0, -range));
     const meshWorldMax = meshWorldPosition.clone().add(new THREE.Vector3(range, 0, range));
     if (
-      localX >= meshWorldMin.x && localZ >= meshWorldMin.z &&
-      localX < meshWorldMax.x && localZ < meshWorldMax.z
+      relativeX >= meshWorldMin.x && relativeZ >= meshWorldMin.z &&
+      relativeX < meshWorldMax.x && relativeZ < meshWorldMax.z
     ) {
-      return target.set(localX - meshWorldMin.x, localZ - meshWorldMin.z);
+      const localX = relativeX - meshWorldMin.x;
+      const localZ = relativeZ - meshWorldMin.z;
+      const index = localX + localZ * range;
+      const timeDiff = timestamp - cutLastTimestampMap[index];
+      if (timeDiff >= cutTime * 1000) {
+        cutLastTimestampMap[index] = timestamp;
+        return target2D.set(relativeX + Math.random(), relativeZ + Math.random());
+      } else {
+        return null;
+      }
     } else {
       return null;
     }
@@ -716,24 +729,90 @@ export default e => {
       });
     }));
   })());
+
+  const itemletMeshes = [];
   const _dropItemlet = position2D => {
-    const geometry = new THREE.PlaneBufferGeometry(0.3, 0.3);
+    const geometry = new THREE.PlaneBufferGeometry(dropItemSize, dropItemSize)
+      .translate(0, dropItemSize/2, 0);
     const texture = itemletTextures[Math.floor(Math.random() * itemletTextures.length)];
-    const material = new THREE.MeshBasicMaterial({
-      map: texture,
+    const material = new WebaverseShaderMaterial({
+      uniforms: {
+        cameraBillboardQuaternion: {
+          value: new THREE.Quaternion(),
+          needsUpdate: false,
+        },
+        uTex: {
+          value: texture,
+          needsUpdate: true,
+        }
+      },
+      vertexShader: `\
+        uniform vec4 cameraBillboardQuaternion;
+        varying vec2 vUv;
+
+        vec3 rotate_vertex_position(vec3 position, vec4 q) { 
+          return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
+        }
+
+        void main() {
+          vec3 pos = position;
+
+          pos = rotate_vertex_position(pos, cameraBillboardQuaternion);
+
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+          vUv = uv;
+        }
+      `,
+      fragmentShader: `\
+        uniform sampler2D uTex;
+        varying vec2 vUv;
+
+        vec3 color1 = vec3(${new THREE.Color(0x7e57c2).toArray().join(', ')});
+        vec3 color2 = vec3(${new THREE.Color(0x512da8).toArray().join(', ')});
+
+        void main() {
+          vec4 displacementColor = texture2D(uTex, vUv);
+          displacementColor.rgb = mix(color1, color2, vUv.y);
+          gl_FragColor = displacementColor;
+        }
+      `,
+      side: THREE.DoubleSide,
       transparent: true,
     });
     const itemletMesh = new THREE.Mesh(geometry, material);
-    itemletMesh.position.setFromMatrixPosition(mesh.matrixWorld)
-      .add(new THREE.Vector3(-range, 0, -range))
-      .add(new THREE.Vector3(position2D.x, 1, position2D.y));
+    itemletMesh.position.set(position2D.x, 0.5, position2D.y);
+    itemletMesh.velocity = new THREE.Vector3(-1 + Math.random() * 2, 3, -1 + Math.random() * 2);
     itemletMesh.frustumCulled = false;
     scene.add(itemletMesh);
     itemletMesh.updateMatrixWorld();
+
+    itemletMesh.update = (timestamp, timeDiff) => {
+      const timeDiffS = timeDiff / 1000;
+      const camera = useCamera();
+      localEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+      localEuler.x = 0;
+      localEuler.z = 0;
+      itemletMesh.material.uniforms.cameraBillboardQuaternion.value.setFromEuler(localEuler);
+      itemletMesh.material.uniforms.cameraBillboardQuaternion.needsUpdate = true;
+
+      itemletMesh.position.add(localVector.copy(itemletMesh.velocity).multiplyScalar(timeDiffS));
+      itemletMesh.velocity.add(localVector.copy(gravity).multiplyScalar(timeDiffS));
+      if (itemletMesh.position.y < 0) {
+        itemletMesh.position.y = 0;
+        itemletMesh.velocity.set(0, 0, 0);
+      }
+      itemletMesh.updateMatrixWorld();
+    };
+
+    itemletMeshes.push(itemletMesh);
   };
 
   useFrame(({timestamp, timeDiff}) => {
     mesh.update(timestamp, timeDiff);
+
+    for (const itemletMesh of itemletMeshes) {
+      itemletMesh.update(timestamp, timeDiff);
+    }
   });
 
   // XXX

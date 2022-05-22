@@ -99,7 +99,13 @@ const makeNoiseTexture = (size = 256) => {
     data[i + 2] = rng() * 255;
     data[i + 3] = rng() * 255;
   }
-  const texture = new THREE.Texture(canvas);
+  context.putImageData(imageData, 0, 0);
+  const texture = new THREE.Texture(
+    canvas,
+    THREE.UVMapping,
+    THREE.RepeatWrapping,
+    THREE.RepeatWrapping,
+  );
   texture.needsUpdate = true;
   return texture;
 };

@@ -526,6 +526,8 @@ const _makeSilksMesh = () => {
       const float topSegmentY = segmentHeight * heightSegments;
       const float cutSpeed = 1.;
       const float cutTime = ${cutTime.toFixed(8)};
+      const float growTime = ${growTime.toFixed(8)};
+      const float cutGrowTime = ${cutGrowTime.toFixed(8)};
       void main() {
         vec3 pos = position;
         vUv = uv;
@@ -539,25 +541,32 @@ const _makeSilksMesh = () => {
         float segmentStartY = float(segment) * segmentHeight;
         float cutY = displacementColor.z;
         float cutSegmentY = floor(cutY / segmentHeight) * segmentHeight;
-        bool isCut = (cutY > 0. && cutY < segmentStartY) &&
-          (vTimeDiff < cutTime);
+        bool isCuttableY = (cutY > 0. && cutY < segmentStartY);
+        bool isCut = isCuttableY && (vTimeDiff < cutTime);
+        bool isGrow = isCuttableY && (vTimeDiff >= cutTime && vTimeDiff < cutGrowTime);
         if (isCut) {
           vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
-          float scale = max(1. - vTimeDiff / cutTime, 0.);
+          float scaleFactor = max(1. - vTimeDiff / cutTime, 0.);
 
+          // scale + rotation
           pos -= centerOfBlade;
-          pos.y *= scale;
+          pos.y *= scaleFactor;
           vec4 q = quat_from_axis_angle(vec3(1., 0., 0.), uTime * 2. * PI * 0.2);
           pos = rotate_vertex_position(pos, q);
           pos += centerOfBlade;
 
+          // velocity + position
           vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv2).xz * 2.;
           vec3 direction = vec3(directionXZ.x, 1., directionXZ.y);
-          pos += direction * vTimeDiff * cutSpeed;
+          pos += direction * vTimeDiff * cutSpeed;            
+        } else if (isGrow) {
+          vec3 bottomOfBlade = vec3(0., cutSegmentY * 0.5, 0.);
+          float scaleFactor = min((vTimeDiff - cutTime) / growTime, 1.);
 
-          // vIsCut = 1.;
-        } else {
-          // vIsCut = 0.;
+          // grow
+          pos -= bottomOfBlade;
+          pos.y *= scaleFactor;
+          pos += bottomOfBlade;
         }
 
         // instance offset
@@ -624,12 +633,7 @@ const _makeSilksMesh = () => {
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
 
         gl_FragColor.rgb = displacementColor.rgb;
-
-        // if (vIsCut > 0.) {
-        //   gl_FragColor.a = max(1. - vTimeDiff, 0.);
-        // } else {
-          gl_FragColor.a = 1.;
-        // }
+        gl_FragColor.a = 1.;
       }
     `,
     // transparent: true,

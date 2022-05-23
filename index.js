@@ -537,7 +537,6 @@ const _makeSilksMesh = () => {
       varying vec2 vUv2;
       varying vec3 vNormal;
       varying float vTimeDiff;
-      // varying float vIsCut;
 
       vec4 quat_from_axis_angle(vec3 axis, float angle) { 
         vec4 qr;
@@ -581,28 +580,34 @@ const _makeSilksMesh = () => {
 
           // compute the splat time
           const float GRAVITY = -9.8;
-          float a = 0.5 * GRAVITY;
-          float b = 3.;
-          float c = centerOfBlade.y;
-          float splatTime = (-b - sqrt(b * b - 4. * a * c)) / (2. * a);
+          // float a = 0.5 * GRAVITY;
+          // float b = 3.;
+          // float c = centerOfBlade.y;
+          // float splatTime = (-b - sqrt(b * b - 4. * a * c)) / (2. * a);
 
-          // scale + rotation
-          pos -= centerOfBlade;
-          // pos.y *= scaleFactor;
-          vec3 rotationAxis = normalize(-1. + texture2D(uNoiseTexture, vUv2).xyz * 2.);
-          vec4 q = quat_from_axis_angle(rotationAxis, uTime * 2. * PI * 0.2);
-          pos = rotate_vertex_position(pos, q);
-          pos += centerOfBlade;
-
-          // velocity + position
-          vec2 vUv3 = mod(vUv2 * 3., 1.); // to not conflict with rotation axis
-          vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv3).xz * 2.;
-          vec3 direction = vec3(directionXZ.x, 1., directionXZ.y);
-          float cutSpeed = texture2D(uNoiseTexture, vUv2).w * 3.;
-          pos += direction * vTimeDiff * cutSpeed;
-          // apply gravity exponent (-9.8 m/s^2)
+          // compute the gravity vector offset
           vec3 gravityVector = vec3(0., GRAVITY * vTimeDiff * vTimeDiff * 0.5, 0.);
-          pos += gravityVector;
+
+          float centerOfBladePositionY = centerOfBlade.y + gravityVector.y;
+          if (centerOfBladePositionY >= 0.) {
+            // scale + rotation
+            pos -= centerOfBlade;
+            // pos.y *= scaleFactor;
+            vec3 rotationAxis = normalize(-1. + texture2D(uNoiseTexture, vUv2).xyz * 2.);
+            vec4 q = quat_from_axis_angle(rotationAxis, uTime * 2. * PI * 0.2);
+            pos = rotate_vertex_position(pos, q);
+            pos += centerOfBlade;
+
+            // velocity + position
+            vec2 vUv3 = mod(vUv2 * 3., 1.); // to not conflict with rotation axis
+            vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv3).xz * 2.;
+            vec3 direction = vec3(directionXZ.x, 1., directionXZ.y);
+            float cutSpeed = texture2D(uNoiseTexture, vUv2).w * 3.;
+            pos += direction * vTimeDiff * cutSpeed;
+            pos += gravityVector;
+          } else {
+            pos = vec3(0.);
+          }
         } else if (isGrow) {
           vec3 bottomOfBlade = vec3(0., cutSegmentY * 0.5, 0.);
           float scaleFactor = min((vTimeDiff - cutTime) / growTime, 1.);
@@ -645,7 +650,6 @@ const _makeSilksMesh = () => {
       varying vec2 vUv2;
       varying vec3 vNormal;
       varying float vTimeDiff;
-      // varying float vIsCut;
 
       vec3 hueShift( vec3 color, float hueAdjust ){
         const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);

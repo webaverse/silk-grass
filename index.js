@@ -15,8 +15,7 @@ const zeroVector = new THREE.Vector3(0, 0, 0);
 const upVector = new THREE.Vector3(0, 1, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
 const dropItemSize = 0.2;
-const range = 5;
-const chunkWorldSize = range * 2;
+const chunkWorldSize = 10;
 const numLods = 1;
 
 const radiusTop = 0.01;
@@ -182,7 +181,7 @@ const _renderSilksGeometry = geometry => {
   const rng = alea('lol');
   const r = n => -n + rng() * 2 * n;
   for (let i = 0; i < numBlades; i++) {
-    localVector.set(r(5), 0, r(5))
+    localVector.set(rng() * chunkWorldSize, 0, rng() * chunkWorldSize)
       .toArray(geometry.attributes.p.array, i * 3);
     localQuaternion.setFromAxisAngle(upVector, r(Math.PI))
       .toArray(geometry.attributes.q.array, i * 4);
@@ -218,7 +217,7 @@ const _makeSilksMesh = () => {
       uniform vec3 pB2;
       varying vec2 vUv;
 
-      const float range = ${range.toFixed(8)};
+      const float chunkWorldSize = ${chunkWorldSize.toFixed(8)};
       const float learningRate = 0.005;
       const float maxDistance = 0.6;
 
@@ -258,7 +257,7 @@ const _makeSilksMesh = () => {
       }
 
       void main() {
-        vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
+        vec2 virtualXZ = vec2(vUv.x, vUv.y) * chunkWorldSize;
         virtualXZ += uWorldPosition.xz;
         float distanceToPlayer = distanceToLine(
           vec3(virtualXZ.x, 0., virtualXZ.y),
@@ -339,7 +338,7 @@ const _makeSilksMesh = () => {
       uniform vec3 pB2;
       varying vec2 vUv;
 
-      const float range = ${range.toFixed(8)};
+      const float chunkWorldSize = ${chunkWorldSize.toFixed(8)};
       const float learningRate = 0.005;
       const float maxDistance = 0.6;
 
@@ -363,7 +362,7 @@ const _makeSilksMesh = () => {
       
       const float cutTime = ${cutTime.toFixed(8)};
       void main() {
-        vec2 virtualXZ = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0) * range;
+        vec2 virtualXZ = vec2(vUv.x, vUv.y) * chunkWorldSize;
         virtualXZ += uWorldPosition.xz;
 
         vec4 color = texture2D(uDisplacementMap, vUv);
@@ -562,7 +561,7 @@ const _makeSilksMesh = () => {
       void main() {
         vec3 pos = position;
         vUv = uv;
-        vUv2 = (p.xz + ${(range).toFixed(8)}) / ${(range * 2).toFixed(8)};
+        vUv2 = p.xz / ${chunkWorldSize.toFixed(8)};
 
         // time diff
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
@@ -704,7 +703,7 @@ const _makeSilksMesh = () => {
     scene.add(cutMesh);
   } */
 
-  const cutLastTimestampMap = new Float32Array((range * 2) ** 2);
+  const cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
   mesh.hitAttempt = (position, quaternion, target2D) => {
     const pointA1 = position.clone()
       .add(new THREE.Vector3(-1, -1.2, -0.1).applyQuaternion(quaternion));
@@ -734,15 +733,15 @@ const _makeSilksMesh = () => {
     const relativeZ = Math.floor(hitCenterPoint.z);    
 
     const meshWorldPosition = new THREE.Vector3().setFromMatrixPosition(mesh.matrixWorld);
-    const meshWorldMin = meshWorldPosition.clone().add(new THREE.Vector3(-range, 0, -range));
-    const meshWorldMax = meshWorldPosition.clone().add(new THREE.Vector3(range, 0, range));
+    const meshWorldMin = meshWorldPosition.clone().add(new THREE.Vector3(0, 0, 0));
+    const meshWorldMax = meshWorldPosition.clone().add(new THREE.Vector3(chunkWorldSize, 0, chunkWorldSize));
     if (
       relativeX >= meshWorldMin.x && relativeZ >= meshWorldMin.z &&
       relativeX < meshWorldMax.x && relativeZ < meshWorldMax.z
     ) {
       const localX = relativeX - meshWorldMin.x;
       const localZ = relativeZ - meshWorldMin.z;
-      const index = localX + localZ * range;
+      const index = localX + localZ * chunkWorldSize;
       const timeDiff = timestamp - cutLastTimestampMap[index];
       if (timeDiff >= cutTime * 1000) {
         cutLastTimestampMap[index] = timestamp;
@@ -801,7 +800,7 @@ export default e => {
 
   const generator = new GrassChunkGenerator(this);
   const tracker = new LodChunkTracker(generator, {
-    chunkWorldSize: range * 2,
+    chunkWorldSize,
     numLods,
   });
 

@@ -764,7 +764,6 @@ class GrassChunkGenerator {
 
     // mesh
     this.chunks = new THREE.Group();
-    window.chunks = this.chunks;
   }
   getMeshes() {
     return this.chunks.children;

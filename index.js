@@ -1,20 +1,35 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
-import { WebaverseShaderMaterial } from '../materials';
-const {useFrame, useScene, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useHitManager} = metaversefile;
+import {WebaverseShaderMaterial} from '../materials';
+const {useFrame, useApp, useScene, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useHitManager, useLodder} = metaversefile;
 
 const localVector = new THREE.Vector3();
 const localQuaternion = new THREE.Quaternion();
 const localEuler = new THREE.Euler();
 const localVector2D = new THREE.Vector2();
-const localVector2D2 = new THREE.Vector2();
-const localBox2D = new THREE.Box2();
+// const localVector2D2 = new THREE.Vector2();
+// const localBox2D = new THREE.Box2();
 
 const zeroVector = new THREE.Vector3(0, 0, 0);
 const upVector = new THREE.Vector3(0, 1, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
 const dropItemSize = 0.2;
+const range = 5;
+const chunkWorldSize = range * 2;
+const numLods = 1;
+
+const radiusTop = 0.01;
+const radiusBottom = radiusTop;
+const height = 0.8;
+const radialSegments = 4;
+const heightSegments = 8;
+const openEnded = false;
+const segmentHeight = height / heightSegments;
+const numBlades = 8 * 1024;
+const cutTime = 1;
+const growTime = 1;
+const cutGrowTime = cutTime + growTime;
 
 //
 
@@ -59,19 +74,6 @@ const _averagePoints = (points, target) => {
 };
 
 //
-
-const radiusTop = 0.01;
-const radiusBottom = radiusTop;
-const height = 0.8;
-const radialSegments = 4;
-const heightSegments = 8;
-const openEnded = false;
-const segmentHeight = height / heightSegments;
-const numBlades = 8 * 1024;
-const range = 5;
-const cutTime = 1;
-const growTime = 1;
-const cutGrowTime = cutTime + growTime;
 
 const fullScreenQuadGeometry = new THREE.PlaneBufferGeometry(2, 2);
 const fullscreenVertexShader = `\
@@ -148,12 +150,8 @@ const createSilkGrassBladeGeometry = () => {
   return geometry;
 };
 
-function createSilksGeometry() {
+function createSilksBaseGeometry() {
   const geometry = createSilkGrassBladeGeometry();
-  /* geometry.setAttribute('p', new THREE.InstancedBufferAttribute(new Float32Array(maxParticles * 3), 3));
-  // geometry.setAttribute('q', new THREE.InstancedBufferAttribute(new Float32Array(maxParticles * 4), 4));
-  geometry.setAttribute('t', new THREE.InstancedBufferAttribute(new Float32Array(maxParticles * 2), 2));
-  geometry.setAttribute('textureIndex', new THREE.InstancedBufferAttribute(new Int32Array(maxParticles), 1)); */
   geometry.setAttribute(
     'p',
     new THREE.InstancedBufferAttribute(new Float32Array(numBlades * 3), 3)
@@ -162,19 +160,9 @@ function createSilksGeometry() {
     'q',
     new THREE.InstancedBufferAttribute(new Float32Array(numBlades * 4), 4)
   );
-
-  const procGen = useProcGen();
-  const {alea} = procGen;
-  const rng = alea('lol');
-  const r = n => -n + rng() * 2 * n;
-  for (let i = 0; i < numBlades; i++) {
-    localVector.set(r(5), 0, r(5))
-      .toArray(geometry.attributes.p.array, i * 3);
-    localQuaternion.setFromAxisAngle(upVector, r(Math.PI))
-      .toArray(geometry.attributes.q.array, i * 4);
-  }
   return geometry;
 };
+const silksBaseGeometry = createSilksBaseGeometry();
 const _makeCutMesh = () => {
   // const {WebaverseShaderMaterial} = useMaterials();
 
@@ -188,10 +176,23 @@ const _makeCutMesh = () => {
   const mesh = new THREE.Mesh(geometry, material);
   return mesh;
 };
+const _renderSilksGeometry = geometry => {
+  const procGen = useProcGen();
+  const {alea} = procGen;
+  const rng = alea('lol');
+  const r = n => -n + rng() * 2 * n;
+  for (let i = 0; i < numBlades; i++) {
+    localVector.set(r(5), 0, r(5))
+      .toArray(geometry.attributes.p.array, i * 3);
+    localQuaternion.setFromAxisAngle(upVector, r(Math.PI))
+      .toArray(geometry.attributes.q.array, i * 4);
+  }
+};
 const _makeSilksMesh = () => {
   const {WebaverseShaderMaterial} = useMaterials();
-  
-  const geometry = createSilksGeometry();
+
+  const geometry = silksBaseGeometry.clone();
+  _renderSilksGeometry(geometry);
 
   const _makeRenderTarget = () => new THREE.WebGLRenderTarget(512, 512, {
     minFilter: THREE.NearestFilter,
@@ -695,11 +696,13 @@ const _makeSilksMesh = () => {
     _flipRenderTargets();
   };
 
-  // XXX
-  const scene = useScene();
-  const cutMesh = _makeCutMesh();
-  cutMesh.frustumCulled = false;
-  scene.add(cutMesh);
+  /* // XXX debugging
+  {
+    const scene = useScene();
+    const cutMesh = _makeCutMesh();
+    cutMesh.frustumCulled = false;
+    scene.add(cutMesh);
+  } */
 
   const cutLastTimestampMap = new Float32Array((range * 2) ** 2);
   mesh.hitAttempt = (position, quaternion, target2D) => {
@@ -711,10 +714,10 @@ const _makeSilksMesh = () => {
       .add(new THREE.Vector3(1, -1.2, -0.1).applyQuaternion(quaternion));
     const pointB2 = position.clone()
       .add(new THREE.Vector3(0.7, -1.2, -1.5).applyQuaternion(quaternion));
-    [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
+    /* [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
       point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
     });
-    cutMesh.geometry.attributes.position.needsUpdate = true;
+    cutMesh.geometry.attributes.position.needsUpdate = true; */
 
     const timestamp = performance.now();
     _renderCut(pointA1, pointA2, pointB1, pointB2, timestamp);
@@ -754,12 +757,65 @@ const _makeSilksMesh = () => {
   return mesh;
 };
 
+class GrassChunkGenerator {
+  constructor(parent) {
+    // parameters
+    this.parent = parent;
+
+    // mesh
+    this.chunks = new THREE.Group();
+    window.chunks = this.chunks;
+  }
+  getMeshes() {
+    return this.chunks.children;
+  }
+  generateChunk(chunk) {
+    const mesh = _makeSilksMesh();
+    mesh.position.set(chunk.x * chunkWorldSize, 0, chunk.z * chunkWorldSize);
+    this.chunks.add(mesh);
+    mesh.updateMatrixWorld();
+
+    chunk.binding = mesh;
+  }
+  disposeChunk(chunk) {
+    const mesh = chunk.binding;
+    this.chunks.remove(mesh);
+    chunk.binding = null;
+  }
+  update(timestamp, timeDiff) {
+    for (const mesh of this.getMeshes()) {
+      mesh.update(timestamp, timeDiff);
+    }
+  }
+  destroy() {
+    // nothing; the owning lod tracker disposes of our contents
+  }
+}
+
 export default e => {
+  const app = useApp();
   const scene = useScene();
   const hitManager = useHitManager();
+  const {LodChunkTracker} = useLodder();
 
-  const mesh = _makeSilksMesh();
+  app.name = 'silk-grass';
 
+  const generator = new GrassChunkGenerator(this);
+  const tracker = new LodChunkTracker(generator, {
+    chunkWorldSize: range * 2,
+    numLods,
+  });
+
+  app.add(generator.chunks);
+  generator.chunks.updateMatrixWorld();
+
+  useFrame(() => {
+    const localPlayer = useLocalPlayer();
+    tracker.update(localPlayer.position);
+  });
+
+  // itemlets support
+  // XXX this should be a type of drop in the drop manager
   let itemletTextures = null;
   e.waitUntil((async () => {
     itemletTextures = await Promise.all(itemletImageUrls.map(url => {
@@ -783,7 +839,6 @@ export default e => {
     }));
   })());
 
-  // XXX this should be a type of drop in the drop manager
   const itemletMeshes = [];
   const _dropItemlet = position2D => {
     const geometry = new THREE.PlaneBufferGeometry(dropItemSize, dropItemSize)
@@ -903,8 +958,8 @@ export default e => {
   };
 
   useFrame(({timestamp, timeDiff}) => {
-    mesh.update(timestamp, timeDiff);
-
+    generator.update(timestamp, timeDiff);
+    
     for (const itemletMesh of itemletMeshes) {
       itemletMesh.update(timestamp, timeDiff);
     }
@@ -918,16 +973,15 @@ export default e => {
         position,
         quaternion,
         // hitHalfHeight,
-        // hitRadius,
       } = args;
-      // console.log('draw cut', e.data, position.toArray().join(','), quaternion.toArray().join(','), cutMesh.geometry);
-
-      const hitTarget2D = mesh.hitAttempt(position, quaternion, localVector2D);
-      if (hitTarget2D) {
-        _dropItemlet(hitTarget2D);
+      for (const mesh of generator.getMeshes()) {
+        const hitTarget2D = mesh.hitAttempt(position, quaternion, localVector2D);
+        if (hitTarget2D) {
+          _dropItemlet(hitTarget2D);
+        }
       }
     }
   });
   
-  return mesh;
+  return app;
 };

@@ -385,6 +385,7 @@ const _makeSilksMesh = () => {
         return (u >= 0.) && (v >= 0.) && (u + v < 1.);
       }
       
+      const float height = ${height.toFixed(8)};
       const float cutTime = ${cutTime.toFixed(8)};
       const float growTime = ${growTime.toFixed(8)};
       void main() {
@@ -397,13 +398,15 @@ const _makeSilksMesh = () => {
         vec2 b = pA2.xz;
         vec2 c = pB1.xz;
         vec2 d = pB2.xz;
+        float timeDiff = uTime - color.w;
         if (
           (
             isPointInTriangle(virtualXZ, a, b, c) || isPointInTriangle(virtualXZ, b, d, c)
           ) &&
-          (uTime - color.w) > (cutTime + growTime * 0.5)
+          timeDiff > (cutTime + growTime * 0.5)
         ) {
-          color.z = (pA1.y + pA2.y + pB1.y + pB2.y) / 4.;
+          // color.z = (pA1.y + pA2.y + pB1.y + pB2.y) / 4.;
+          color.z = height / 8.;
           color.w = uTime;
         }
         gl_FragColor = color;

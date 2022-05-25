@@ -4,6 +4,8 @@ import metaversefile from 'metaversefile';
 import {WebaverseShaderMaterial} from '../materials';
 const {useFrame, useApp, useScene, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useHitManager, useLodder} = metaversefile;
 
+const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
+
 const localVector = new THREE.Vector3();
 const localQuaternion = new THREE.Quaternion();
 const localEuler = new THREE.Euler();
@@ -134,7 +136,7 @@ const makeSeamlessNoiseTexture = () => {
   img.onerror = err => {
     console.warn(err);
   };
-  img.src = '/images/perlin-noise.jpg';
+  img.src = `${baseUrl}perlin-noise.jpg`;
 
   return texture;
 };

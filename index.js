@@ -537,6 +537,7 @@ const _makeSilksMesh = () => {
       varying vec2 vUv2;
       varying vec3 vNormal;
       varying float vTimeDiff;
+      varying float vY;
 
       vec4 quat_from_axis_angle(vec3 axis, float angle) { 
         vec4 qr;
@@ -578,33 +579,31 @@ const _makeSilksMesh = () => {
           vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
           // float scaleFactor = max(1. - vTimeDiff / cutTime, 0.);
 
-          // compute the splat time
+          // acceleration / velocity
           const float GRAVITY = -9.8;
-          // float a = 0.5 * GRAVITY;
-          // float b = 3.;
-          // float c = centerOfBlade.y;
-          // float splatTime = (-b - sqrt(b * b - 4. * a * c)) / (2. * a);
+          const float CUT_VELOCITY = 1.5;
 
-          // compute the gravity vector offset
+          vec2 vUv3 = mod(vUv2 * 3., 1.); // to not conflict with rotation axis
+          vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv3).xz * 2.;
+          
+          // compute the acceleration / velocity offset
           vec3 gravityVector = vec3(0., GRAVITY * vTimeDiff * vTimeDiff * 0.5, 0.);
+          float cutSpeed = texture2D(uNoiseTexture, vUv2).w * 3.;
+          vec3 direction = vec3(directionXZ.x, CUT_VELOCITY, directionXZ.y);
+          vec3 velocityVector = direction * vTimeDiff * cutSpeed;
 
-          float centerOfBladePositionY = centerOfBlade.y + gravityVector.y;
+          float centerOfBladePositionY = centerOfBlade.y + velocityVector.y + gravityVector.y;
           if (centerOfBladePositionY >= 0.) {
             // scale + rotation
             pos -= centerOfBlade;
-            // pos.y *= scaleFactor;
             vec3 rotationAxis = normalize(-1. + texture2D(uNoiseTexture, vUv2).xyz * 2.);
             vec4 q = quat_from_axis_angle(rotationAxis, uTime * 2. * PI * 0.2);
             pos = rotate_vertex_position(pos, q);
             pos += centerOfBlade;
 
             // velocity + position
-            vec2 vUv3 = mod(vUv2 * 3., 1.); // to not conflict with rotation axis
-            vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv3).xz * 2.;
-            vec3 direction = vec3(directionXZ.x, 1., directionXZ.y);
-            float cutSpeed = texture2D(uNoiseTexture, vUv2).w * 3.;
-            pos += direction * vTimeDiff * cutSpeed;
-            pos += gravityVector;
+            pos += velocityVector +
+              gravityVector;
           } else {
             pos = vec3(0.);
           }
@@ -623,6 +622,8 @@ const _makeSilksMesh = () => {
           pos = rotate_vertex_position(pos, q);
           pos += p;
         }
+
+        vY = pos.y;
 
         // displacement bend
         if (!isCut) {
@@ -650,6 +651,7 @@ const _makeSilksMesh = () => {
       varying vec2 vUv2;
       varying vec3 vNormal;
       varying float vTimeDiff;
+      varying float vY;
 
       vec3 hueShift( vec3 color, float hueAdjust ){
         const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
@@ -676,11 +678,18 @@ const _makeSilksMesh = () => {
         return vec3( dot (yIQ, kYIQToR), dot (yIQ, kYIQToG), dot (yIQ, kYIQToB) );
       }
 
+      float rand(float n){return fract(sin(n) * 43758.5453123);}
+
+      const float height = ${height.toFixed(8)};
       const float cutTime = ${cutTime.toFixed(8)};
+      const vec3 color = vec3(${new THREE.Color(0x66bb6a).toArray().join(', ')});
       void main() {
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
-
-        gl_FragColor.rgb = displacementColor.rgb;
+        
+        // gl_FragColor.rgb = displacementColor.rgb;
+        gl_FragColor.rgb = color *
+          (0.4 + rand(floor(100. + vY * 15.)) * 0.6) *
+          (0.2 + vY/height * 0.8);
         gl_FragColor.a = 1.;
       }
     `,

@@ -581,7 +581,7 @@ const _makeSilksMesh = () => {
 
           // acceleration / velocity
           const float GRAVITY = -9.8;
-          const float CUT_VELOCITY = 1.5;
+          const float CUT_VELOCITY = 2.;
 
           vec2 vUv3 = mod(vUv2 * 3., 1.); // to not conflict with rotation axis
           vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv3).xz * 2.;

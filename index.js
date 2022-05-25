@@ -30,6 +30,8 @@ const cutTime = 1;
 const growTime = 1;
 const cutGrowTime = cutTime + growTime;
 
+const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
+
 //
 
 const itemletImageUrls = [
@@ -530,6 +532,7 @@ const _makeSilksMesh = () => {
     displacementMaps[1] = temp;
   };
 
+  console.log('wind rotation', windRotation);
   const material = new WebaverseShaderMaterial({
     uniforms: {
       uTime: {
@@ -548,6 +551,10 @@ const _makeSilksMesh = () => {
         value: getSeamlessNoiseTexture(),
         needsUpdate: true,
       },
+      uWindRotation: {
+        value: windRotation,
+        needsUpdate: true,
+      },
     },
     vertexShader: `\
       precision highp float;
@@ -557,6 +564,7 @@ const _makeSilksMesh = () => {
       uniform sampler2D uDisplacementMap;
       uniform sampler2D uNoiseTexture;
       uniform sampler2D uSeamlessNoiseTexture;
+      uniform float uWindRotation;
       attribute vec3 p;
       attribute vec4 q;
       attribute int segment;
@@ -670,6 +678,8 @@ const _makeSilksMesh = () => {
           float windOffsetY = 0.;
           float windOffsetZ = 0.;
           vec3 windOffset = vec3(windOffsetX, windOffsetY, windOffsetZ);
+          vec4 q2 = quat_from_axis_angle(vec3(0., 1., 0.), uWindRotation);
+          windOffset = rotate_vertex_position(windOffset, q2);
           pos += windOffset * 1.;
         }
 

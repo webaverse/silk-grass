@@ -27,8 +27,9 @@ const openEnded = false;
 const segmentHeight = height / heightSegments;
 const numBlades = 8 * 1024;
 const cutTime = 1;
-const growTime = 1;
+const growTime = 60;
 const cutGrowTime = cutTime + growTime;
+const cutHeightOffset = -1.4;
 
 const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
 
@@ -385,6 +386,7 @@ const _makeSilksMesh = () => {
       }
       
       const float cutTime = ${cutTime.toFixed(8)};
+      const float growTime = ${growTime.toFixed(8)};
       void main() {
         vec2 virtualXZ = vec2(vUv.x, vUv.y) * chunkWorldSize;
         virtualXZ += uWorldPosition.xz;
@@ -399,7 +401,7 @@ const _makeSilksMesh = () => {
           (
             isPointInTriangle(virtualXZ, a, b, c) || isPointInTriangle(virtualXZ, b, d, c)
           ) &&
-          (uTime - color.w) > cutTime
+          (uTime - color.w) > (cutTime + growTime * 0.5)
         ) {
           color.z = (pA1.y + pA2.y + pB1.y + pB2.y) / 4.;
           color.w = uTime;
@@ -776,11 +778,11 @@ const _makeSilksMesh = () => {
   const cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
   mesh.hitAttempt = (position, quaternion, target2D) => {
     const pointA1 = position.clone()
-      .add(new THREE.Vector3(-1, -1.2, -0.1).applyQuaternion(quaternion));
+      .add(new THREE.Vector3(-1, cutHeightOffset, -0.1).applyQuaternion(quaternion));
     const pointA2 = position.clone()
-      .add(new THREE.Vector3(-0.7, -1.2, -1.5).applyQuaternion(quaternion));
+      .add(new THREE.Vector3(-0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
     const pointB1 = position.clone()
-      .add(new THREE.Vector3(1, -1.2, -0.1).applyQuaternion(quaternion));
+      .add(new THREE.Vector3(1, cutHeightOffset, -0.1).applyQuaternion(quaternion));
     const pointB2 = position.clone()
       .add(new THREE.Vector3(0.7, -1.2, -1.5).applyQuaternion(quaternion));
     /* [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
@@ -813,7 +815,7 @@ const _makeSilksMesh = () => {
       const localZ = relativeZ - meshWorldMin.z;
       const index = localX + localZ * chunkWorldSize;
       const timeDiff = timestamp - cutLastTimestampMap[index];
-      if (timeDiff >= cutTime * 1000) {
+      if (timeDiff >= (cutTime + growTime / 2) * 1000) {
         cutLastTimestampMap[index] = timestamp;
         return target2D.set(relativeX + Math.random(), relativeZ + Math.random());
       } else {

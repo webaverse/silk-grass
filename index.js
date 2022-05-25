@@ -21,7 +21,7 @@ const chunkWorldSize = 10;
 const numLods = 1;
 
 const height = 0.8;
-const radialSegments = 4;
+const radialSegments = 3;
 const heightSegments = 8;
 const openEnded = false;
 const segmentHeight = height / heightSegments;

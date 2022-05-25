@@ -18,8 +18,6 @@ const dropItemSize = 0.2;
 const chunkWorldSize = 10;
 const numLods = 1;
 
-const radiusTop = 0.01;
-const radiusBottom = radiusTop;
 const height = 0.8;
 const radialSegments = 4;
 const heightSegments = 8;
@@ -119,9 +117,41 @@ const getNoiseTexture = (() => {
     return noiseTexture;
   };
 })();
+const makeSeamlessNoiseTexture = () => {
+  const img = new Image();
+  const texture = new THREE.Texture(img);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+
+  img.crossOrigin = 'Anonymous';
+  img.onload = () => {
+    // console.log('load image', img);
+    // document.body.appendChild(img);
+    texture.needsUpdate = true;
+  };
+  img.onerror = err => {
+    console.warn(err);
+  };
+  img.src = '/images/perlin-noise.jpg';
+
+  return texture;
+};
+const getSeamlessNoiseTexture = (() => {
+  let noiseTexture = null;
+  return () => {
+    if (!noiseTexture) {
+      noiseTexture = makeSeamlessNoiseTexture();
+    }
+    return noiseTexture;
+  };
+})();
 
 const createSilkGrassBladeGeometry = () => {
   const geometryNonInstanced = (() => {
+    const radiusTop = 0.05;
+    const radiusBottom = radiusTop;
     const baseGeometry = new THREE.CylinderGeometry(
       radiusTop,
       radiusBottom,
@@ -139,6 +169,13 @@ const createSilkGrassBladeGeometry = () => {
       geometries.push(geometry);
     }
     const result = BufferGeometryUtils.mergeBufferGeometries(geometries);
+    for (let i = 0; i < result.attributes.position.count; i++) {
+      localVector.fromArray(result.attributes.position.array, i * 3);
+      const heightFactor = (height - localVector.y) / height;
+      localVector.x *= heightFactor;
+      localVector.z *= heightFactor;
+      localVector.toArray(result.attributes.position.array, i * 3);
+    }
     return result;
   })();
   const geometry = new THREE.InstancedBufferGeometry();
@@ -210,6 +247,7 @@ const _makeSilksMesh = () => {
     const fullscreenFragmentShader = `\
       uniform vec3 uPlayerPosition;
       uniform vec3 uWorldPosition;
+      uniform sampler2D uNoiseTexture;
       uniform sampler2D uDisplacementMap;
       uniform vec3 pA1;
       uniform vec3 pA2;
@@ -236,24 +274,6 @@ const _makeSilksMesh = () => {
         float b = c1 / c2;
         vec3 pointOnLine = pointA + b * v;
         return length(p - pointOnLine);
-      }
-
-      bool isPointInTriangle(vec2 point, vec2 a, vec2 b, vec2 c) {
-        vec2 v0 = c - a;
-        vec2 v1 = b - a;
-        vec2 v2 = point - a;
-    
-        float dot00 = dot(v0, v0);
-        float dot01 = dot(v0, v1);
-        float dot02 = dot(v0, v2);
-        float dot11 = dot(v1, v1);
-        float dot12 = dot(v1, v2);
-    
-        float invDenom = 1. / (dot00 * dot11 - dot01 * dot01);
-        float u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-        float v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-    
-        return (u >= 0.) && (v >= 0.) && (u + v < 1.);
       }
 
       void main() {
@@ -522,6 +542,10 @@ const _makeSilksMesh = () => {
         value: getNoiseTexture(),
         needsUpdate: true,
       },
+      uSeamlessNoiseTexture: {
+        value: getSeamlessNoiseTexture(),
+        needsUpdate: true,
+      },
     },
     vertexShader: `\
       precision highp float;
@@ -530,6 +554,7 @@ const _makeSilksMesh = () => {
       uniform float uTime;
       uniform sampler2D uDisplacementMap;
       uniform sampler2D uNoiseTexture;
+      uniform sampler2D uSeamlessNoiseTexture;
       attribute vec3 p;
       attribute vec4 q;
       attribute int segment;
@@ -538,6 +563,7 @@ const _makeSilksMesh = () => {
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
+      varying vec3 vNoise;
 
       vec4 quat_from_axis_angle(vec3 axis, float angle) { 
         vec4 qr;
@@ -602,8 +628,7 @@ const _makeSilksMesh = () => {
             pos += centerOfBlade;
 
             // velocity + position
-            pos += velocityVector +
-              gravityVector;
+            pos += velocityVector + gravityVector;
           } else {
             pos = vec3(0.);
           }
@@ -623,7 +648,31 @@ const _makeSilksMesh = () => {
           pos += p;
         }
 
+        if (!isCut) {
+          // wind
+          float windOffsetX = texture2D(
+            uSeamlessNoiseTexture,
+            (vUv2 * 0.1) * 3. +
+              vec2(uTime * 0.05)
+          ).r * pos.y;
+          /* float windOffsetY = texture2D(
+            uSeamlessNoiseTexture,
+            (vUv2 * 0.03) * 3. + 1. +
+              vec2(uTime * 0.001)
+          ).r;
+          float windOffsetZ = texture2D(
+            uSeamlessNoiseTexture,
+            (vUv2 * 0.03) * 3. + 2. +
+              vec2(uTime * 0.001)
+          ).r; */
+          float windOffsetY = 0.;
+          float windOffsetZ = 0.;
+          vec3 windOffset = vec3(windOffsetX, windOffsetY, windOffsetZ);
+          pos += windOffset * 1.;
+        }
+
         vY = pos.y;
+        vNoise = texture2D(uNoiseTexture, vUv2).xyz;
 
         // displacement bend
         if (!isCut) {
@@ -652,6 +701,7 @@ const _makeSilksMesh = () => {
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
+      varying vec3 vNoise;
 
       vec3 hueShift( vec3 color, float hueAdjust ){
         const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
@@ -688,7 +738,7 @@ const _makeSilksMesh = () => {
         
         // gl_FragColor.rgb = displacementColor.rgb;
         gl_FragColor.rgb = color *
-          (0.4 + rand(floor(100. + vY * 15.)) * 0.6) *
+          (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
           (0.2 + vY/height * 0.8);
         gl_FragColor.a = 1.;
       }

@@ -532,7 +532,6 @@ const _makeSilksMesh = () => {
     displacementMaps[1] = temp;
   };
 
-  console.log('wind rotation', windRotation);
   const material = new WebaverseShaderMaterial({
     uniforms: {
       uTime: {

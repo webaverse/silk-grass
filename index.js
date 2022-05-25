@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
 import {WebaverseShaderMaterial} from '../materials';
-const {useFrame, useApp, useScene, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useHitManager, useLodder} = metaversefile;
+const {useFrame, useApp, useScene, useSound, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useHitManager, useLodder} = metaversefile;
 
 const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
 
@@ -865,6 +865,7 @@ export default e => {
   const scene = useScene();
   const hitManager = useHitManager();
   const {LodChunkTracker} = useLodder();
+  const sounds = useSound();
 
   app.name = 'silk-grass';
 
@@ -1046,6 +1047,8 @@ export default e => {
         const hitTarget2D = mesh.hitAttempt(position, quaternion, localVector2D);
         if (hitTarget2D) {
           _dropItemlet(hitTarget2D);
+
+          sounds.playSoundName('bushCut');
         }
       }
     }

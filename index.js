@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
-import {WebaverseShaderMaterial} from '../materials';
 const {useFrame, useApp, useScene, useSound, useMaterials, useRenderer, useCamera, useProcGen, useLocalPlayer, useHitManager, useLodder} = metaversefile;
 
 const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
@@ -205,7 +204,7 @@ function createSilksBaseGeometry() {
 };
 const silksBaseGeometry = createSilksBaseGeometry();
 const _makeCutMesh = () => {
-  // const {WebaverseShaderMaterial} = useMaterials();
+  const {WebaverseShaderMaterial} = useMaterials();
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(4 * 3), 3));

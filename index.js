@@ -15,7 +15,7 @@ const localVector2D = new THREE.Vector2();
 const zeroVector = new THREE.Vector3(0, 0, 0);
 const upVector = new THREE.Vector3(0, 1, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
-const dropItemSize = 0.3;
+const dropItemSize = 0.2;
 const chunkWorldSize = 10;
 const numLods = 1;
 

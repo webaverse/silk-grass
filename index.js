@@ -15,7 +15,7 @@ const localVector2D = new THREE.Vector2();
 const zeroVector = new THREE.Vector3(0, 0, 0);
 const upVector = new THREE.Vector3(0, 1, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
-const dropItemSize = 0.2;
+const dropItemSize = 0.3;
 const chunkWorldSize = 10;
 const numLods = 1;
 
@@ -29,18 +29,25 @@ const cutTime = 1;
 const growTime = 60;
 const cutGrowTime = cutTime + growTime;
 const cutHeightOffset = -1.4;
+const floorLimit = dropItemSize / 2;
 
 const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
 
 //
 
 const itemletImageUrls = [
-  'noun-fruit-4617781.svg',
+  /* 'noun-fruit-4617781.svg',
   'noun-root-4617773.svg',
   'noun-potion-3097512.svg',
-  'noun-poison-4837113.svg',
+  'noun-poison-4837113.svg', */
+  'HP-01.svg',
+  'HP_negative-01.svg',
+  'MP_green-01.svg',
+  'MP_purple-01.svg',
+  'XP-01.svg',
+  'XP_negative-01.svg',
 ].map(name => `/images/items/${name}`);
-const colorPalettes = [
+/* const colorPalettes = [
   [ // red
     0xef5350,
     0xd32f2f,
@@ -65,7 +72,7 @@ const colorPalettes = [
     color1.getHex(),
     color2.getHex(),
   ]
-});
+}); */
 const _averagePoints = (points, target) => {
   target.copy(points[0]);
   for (let i = 1; i < points.length; i++) {
@@ -204,7 +211,7 @@ function createSilksBaseGeometry() {
 };
 const silksBaseGeometry = createSilksBaseGeometry();
 const _makeCutMesh = () => {
-  const {WebaverseShaderMaterial} = useMaterials();
+  // const {WebaverseShaderMaterial} = useMaterials();
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(4 * 3), 3));
@@ -867,6 +874,7 @@ class GrassChunkGenerator {
 export default e => {
   const app = useApp();
   const scene = useScene();
+  const {WebaverseShaderMaterial} = useMaterials();
   const hitManager = useHitManager();
   const {LodChunkTracker} = useLodder();
   const sounds = useSound();
@@ -918,7 +926,7 @@ export default e => {
       .translate(0, dropItemSize/2, 0);
     const index = Math.floor(Math.random() * itemletTextures.length);
     const texture = itemletTextures[index];
-    const colorPalette = colorPalettes[index];
+    // const colorPalette = colorPalettes[index];
     const material = new WebaverseShaderMaterial({
       uniforms: {
         cameraBillboardQuaternion: {
@@ -929,14 +937,14 @@ export default e => {
           value: texture,
           needsUpdate: true,
         },
-        color1: {
+        /* color1: {
           value: new THREE.Color(colorPalette[0]),
           needsUpdate: true,
         },
         color2: {
           value: new THREE.Color(colorPalette[1]),
           needsUpdate: true,
-        },
+        }, */
       },
       vertexShader: `\
         uniform vec4 cameraBillboardQuaternion;
@@ -957,13 +965,13 @@ export default e => {
       `,
       fragmentShader: `\
         uniform sampler2D uTex;
-        uniform vec3 color1;
-        uniform vec3 color2;
+        // uniform vec3 color1;
+        // uniform vec3 color2;
         varying vec2 vUv;
 
         void main() {
           vec4 displacementColor = texture2D(uTex, vUv);
-          displacementColor.rgb = mix(color2, color1, vUv.y);
+          // displacementColor.rgb = mix(color2, color1, vUv.y);
           gl_FragColor = displacementColor;
           if (gl_FragColor.a < 0.1) {
             discard;
@@ -1007,8 +1015,8 @@ export default e => {
         if (!itemletMesh.velocity.equals(zeroVector)) {
           itemletMesh.position.add(localVector.copy(itemletMesh.velocity).multiplyScalar(timeDiffS));
           itemletMesh.velocity.add(localVector.copy(gravity).multiplyScalar(timeDiffS));
-          if (itemletMesh.position.y < 0) {
-            itemletMesh.position.y = 0;
+          if (itemletMesh.position.y < floorLimit) {
+            itemletMesh.position.y = floorLimit;
             itemletMesh.velocity.set(0, 0, 0);
           }
           itemletMesh.updateMatrixWorld();

@@ -33,6 +33,21 @@ const floorLimit = dropItemSize / 2;
 
 const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
 
+const windZones = metaversefile.getWinds();
+const windZoneDir = new THREE.Vector3();
+let windZoneFreq = 0;
+let windZoneForce = 0;
+
+for(const wind of windZones){
+  if(wind.windType === 'directional'){
+    windZoneDir.set(wind.direction[0], wind.direction[1], wind.direction[2]);
+    windZoneDir.normalize();
+    windZoneFreq = wind.windFrequency;
+    windZoneForce =  wind.windForce <= 10 ? wind.windForce : 10;
+    break;
+  }
+}
+
 //
 
 const itemletImageUrls = [
@@ -536,6 +551,10 @@ const _makeSilksMesh = () => {
 
     material.uniforms.uDisplacementMap.value = displacementMaps[1].texture;
     material.uniforms.uDisplacementMap.needsUpdate = true;
+
+    material.uniforms.uWorldPosition.value.setFromMatrixPosition(mesh.matrixWorld);
+    material.uniforms.uWorldPosition.needsUpdate = true;
+
   };
   const _flipRenderTargets = () => {
     const temp = displacementMaps[0];
@@ -565,16 +584,36 @@ const _makeSilksMesh = () => {
         value: windRotation,
         needsUpdate: true,
       },
+      uWindZoneDir: {
+        value: windZoneDir,
+        needsUpdate: true,
+      },
+      uWindZoneFreq: {
+        value: windZoneFreq,
+        needsUpdate: true,
+      },
+      uWindZoneForce: {
+        value: windZoneForce,
+        needsUpdate: true,
+      },
+      uWorldPosition: {
+        value: new THREE.Vector3(0, 0, 0),
+        needsUpdate: false,
+      },
     },
     vertexShader: `\
       precision highp float;
       precision highp int;
 
       uniform float uTime;
+      uniform vec3 uWorldPosition;
       uniform sampler2D uDisplacementMap;
       uniform sampler2D uNoiseTexture;
       uniform sampler2D uSeamlessNoiseTexture;
       uniform float uWindRotation;
+      uniform vec3 uWindZoneDir;
+      uniform float uWindZoneFreq;
+      uniform float uWindZoneForce;
       attribute vec3 p;
       attribute vec4 q;
       attribute int segment;
@@ -597,6 +636,22 @@ const _makeSilksMesh = () => {
 
       vec3 rotate_vertex_position(vec3 position, vec4 q) { 
         return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
+      }
+
+      float distanceToLine(vec3 p, vec3 pointA, vec3 pointB) {
+        vec3 v = pointB - pointA;
+        vec3 w = p - pointA;
+        float c1 = dot(w, v);
+        if (c1 <= 0.0) {
+          return length(p - pointA);
+        }
+        float c2 = dot(v, v);
+        if (c2 <= c1) {
+          return length(p - pointB);
+        }
+        float b = c1 / c2;
+        vec3 pointOnLine = pointA + b * v;
+        return length(p - pointOnLine);
       }
 
       const float segmentHeight = ${segmentHeight.toFixed(8)};
@@ -673,24 +728,34 @@ const _makeSilksMesh = () => {
           float windOffsetX = texture2D(
             uSeamlessNoiseTexture,
             (vUv2 * 0.1) * 3. +
-              vec2(uTime * 0.05)
-          ).r * pos.y;
+              vec2(uTime * uWindZoneFreq * 0.05)
+          ).r * pos.y * uWindZoneDir.x * (1.0 + uWindZoneForce * 0.03);
           /* float windOffsetY = texture2D(
             uSeamlessNoiseTexture,
             (vUv2 * 0.03) * 3. + 1. +
               vec2(uTime * 0.001)
-          ).r;
+          ).r;*/
           float windOffsetZ = texture2D(
             uSeamlessNoiseTexture,
-            (vUv2 * 0.03) * 3. + 2. +
-              vec2(uTime * 0.001)
-          ).r; */
+            (vUv2 * 0.1) * 3. +
+              vec2(uTime * uWindZoneFreq * 0.05)
+          ).r * pos.y * uWindZoneDir.z * (1.0 + uWindZoneForce * 0.03);
           float windOffsetY = 0.;
-          float windOffsetZ = 0.;
+          //float windOffsetZ = 0.;
           vec3 windOffset = vec3(windOffsetX, windOffsetY, windOffsetZ);
-          vec4 q2 = quat_from_axis_angle(vec3(0., 1., 0.), uWindRotation);
-          windOffset = rotate_vertex_position(windOffset, q2);
+          // vec4 q2 = quat_from_axis_angle(vec3(0., 1., 0.), uWindRotation);
+          // windOffset = rotate_vertex_position(windOffset, q2);
           pos += windOffset * 1.;
+          
+          // vec3 rPos = pos + uWorldPosition;
+          // float a  = rPos.x * rPos.x;
+          // float b  = rPos.y * rPos.y;
+          // float c  = rPos.z * rPos.z;
+          // float d = sqrt(a + b + c);
+          
+          // if(d < 5.){
+          //   pos.y += 1.0;
+          // }
         }
 
         vY = pos.y;

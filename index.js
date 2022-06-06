@@ -12,13 +12,13 @@ const localEuler = new THREE.Euler();
 const localVector2D = new THREE.Vector2();
 
 const zeroVector = new THREE.Vector3(0, 0, 0);
-const upVector = new THREE.Vector3(0, 1, 0);
+// const upVector = new THREE.Vector3(0, 1, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
 const dropItemSize = 0.2;
-const chunkWorldSize = 10;
-const heightfieldRange = 3;
-const heightfieldSize = chunkWorldSize * heightfieldRange;
-const heightfieldPosition = new THREE.Vector4(-chunkWorldSize, -chunkWorldSize, heightfieldSize, heightfieldSize);
+const chunkWorldSize = 16;
+// const heightfieldRange = 3;
+// const heightfieldSize = chunkWorldSize * heightfieldRange;
+// const heightfieldPosition = new THREE.Vector4(-chunkWorldSize, -chunkWorldSize, heightfieldSize, heightfieldSize);
 const numLods = 1;
 const maxAnisotropy = 16;
 
@@ -560,7 +560,7 @@ class SilkGrassMesh extends BatchedMesh {
 
     // main material
     
-    const heightfieldTexture = new THREE.DataTexture(null, heightfieldSize, heightfieldSize, THREE.RedFormat, THREE.FloatType);
+    /* const heightfieldTexture = new THREE.DataTexture(null, heightfieldSize, heightfieldSize, THREE.RedFormat, THREE.FloatType);
     heightfieldTexture.minFilter = THREE.LinearFilter;
     heightfieldTexture.magFilter = THREE.LinearFilter;
     heightfieldTexture.wrapS = THREE.ClampToEdgeWrapping;
@@ -569,13 +569,6 @@ class SilkGrassMesh extends BatchedMesh {
     const _getHeightfieldAsync = async () => {
       const dcWorkerManager = useDcWorkerManager();
       const lod = 1;
-      /* console.log('get heigthfield 1', {
-        x: heightfieldPosition.x,
-        y: heightfieldPosition.y,
-        heightfieldSize,
-        heightfieldSize,
-        lod
-      }); */
       const heightfield = await dcWorkerManager.getHeightfieldRange(
         heightfieldPosition.x,
         heightfieldPosition.y,
@@ -589,8 +582,8 @@ class SilkGrassMesh extends BatchedMesh {
       const heightfield = await _getHeightfieldAsync();
       heightfieldTexture.image.data = heightfield;
       heightfieldTexture.needsUpdate = true;
-      console.log('load heightfield', heightfieldTexture);
-    })();
+      // console.log('load heightfield', heightfieldTexture);
+    })(); */
 
     const grassVertexShader = `\
       precision highp float;
@@ -705,14 +698,14 @@ class SilkGrassMesh extends BatchedMesh {
           pos += bottomOfBlade;
         }
 
+        vY = pos.y;
+        vNoise = texture2D(uNoiseTexture, vUv2).xyz;
+
         // instance offset
         {
           pos = rotate_vertex_position(pos, q);
-          pos += p;
+          pos.xz += p.xz;
         }
-
-        vY = pos.y;
-        vNoise = texture2D(uNoiseTexture, vUv2).xyz;
 
         // wind
         if (!isCut) {
@@ -736,13 +729,16 @@ class SilkGrassMesh extends BatchedMesh {
         }
 
         // height offset
-        {
+        /* {
           vec2 heightfieldMin = uHeightfieldPosition.xy;
           vec2 heightfieldMax = uHeightfieldPosition.zw;
           vec2 heightUv = (p.xz - heightfieldMin) / (heightfieldMax - heightfieldMin);
           if (heightUv.x >= 0. && heightUv.x < 1. && heightUv.y >= 0. && heightUv.y < 1.) {
             pos.y += texture2D(uHeightfieldTexture, heightUv).r;
           }
+        } */
+        {
+          pos.y += p.y;
         }
 
         // output
@@ -838,14 +834,14 @@ class SilkGrassMesh extends BatchedMesh {
           value: textures['q'],
           needsUpdate: true,
         },
-        uHeightfieldTexture: {
+        /* uHeightfieldTexture: {
           value: heightfieldTexture,
           needsUpdate: true,
         },
         uHeightfieldPosition: {
           value: heightfieldPosition,
           needsUpdate: true,
-        },
+        }, */
       },
       vertexShader: grassVertexShader,
       fragmentShader: grassFragmentShader,
@@ -855,24 +851,39 @@ class SilkGrassMesh extends BatchedMesh {
     this.frustumCulled = false;
 
     this.allocator = allocator;
-    this.addChunk = (chunk, {
+    this.addChunk = async (chunk, {
       signal,
     } = {}) => {
       if (chunk.y === 0) {
-        const _renderSilksGeometry = (drawCall) => {
-          const procGen = useProcGen();
-          const {alea} = procGen;
-          const rng = alea('lol');
-          const r = n => -n + rng() * 2 * n;
+        let live = true;
+        signal.addEventListener('abort', e => {
+          live = false;
+        });
+
+        const _getGrassData = async () => {
+          const dcWorkerManager = useDcWorkerManager();
+          const lod = 1;
+          const result = await dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
+          return result;
+        };
+        const result = await _getGrassData();
+        if (!live) return;
+
+        const _renderSilksGeometry = (drawCall, ps, qs) => {
+          // const procGen = useProcGen();
+          // const {alea} = procGen;
+          // const rng = alea('lol');
+          // const r = n => -n + rng() * 2 * n;
 
           const pTexture = drawCall.getTexture('p');
           const pOffset = drawCall.getTextureOffset('p');
           const qTexture = drawCall.getTexture('q');
           const qOffset = drawCall.getTextureOffset('q');
-          
-          // console.log('got chunk', chunk.x, chunk.z);
 
-          for (let i = 0; i < numBlades; i++) {
+          pTexture.image.data.set(ps, pOffset);
+          qTexture.image.data.set(qs, qOffset);
+          
+          /* for (let i = 0; i < numBlades; i++) {
             const pIndex = pOffset + i * 3;
             localVector.copy(chunk)
               .multiplyScalar(chunkWorldSize)
@@ -882,36 +893,20 @@ class SilkGrassMesh extends BatchedMesh {
             const qIndex = qOffset + i * 4;
             localQuaternion.setFromAxisAngle(upVector, r(Math.PI))
               .toArray(qTexture.image.data, qIndex);
-          }
+          } */
 
-          drawCall.updateTexture('p', pOffset, numBlades);
-          drawCall.updateTexture('q', qOffset, numBlades);
+          drawCall.updateTexture('p', pOffset, ps.length);
+          drawCall.updateTexture('q', qOffset, qs.length);
 
-          drawCall.setInstanceCount(numBlades);
-
-          // console.log('update texture', numBlades);
+          drawCall.setInstanceCount(ps.length / 3);
         };
-        /* const _updateRenderList = () => {
-          // allocator.geometry.groups = allocator.instanceFreeList.getGeometryGroups(); // XXX memory for this can be optimized
-          allocator.geometry.groups = [
-            {
-              start: 0,
-              count: 128,
-              materialIndex: 0,
-            },
-          ];
-        }; */
-        const _handleMesh = () => {
-          const drawCall = allocator.allocDrawCall(0);
-          _renderSilksGeometry(drawCall);
-          // _updateRenderList();
 
-          signal.addEventListener('abort', e => {
-            allocator.freeDrawCall(drawCall);
-            // _updateRenderList();
-          });
-        };
-        _handleMesh();
+        const drawCall = allocator.allocDrawCall(0);
+        _renderSilksGeometry(drawCall, result.ps, result.qs);
+
+        signal.addEventListener('abort', e => {
+          allocator.freeDrawCall(drawCall);
+        });
       }
     };
     this.update = (timestamp, timeDiff) => {
@@ -1004,16 +999,20 @@ class GrassChunkGenerator {
   generateChunk(chunk) {
     const abortController = new AbortController();
     const {signal} = abortController;
-    this.mesh.addChunk(chunk, {
-      signal,
-    });
-    // mesh.position.set(chunk.x * chunkWorldSize, 0, chunk.z * chunkWorldSize);
+    
+    (async () => {
+      this.mesh.addChunk(chunk, {
+        signal,
+      });
+    })();    
 
     chunk.binding = {
       abortController,
     };
   }
   disposeChunk(chunk) {
+    // console.log('dispose chunk', chunk.toArray().join(','));
+
     const {abortController} = chunk.binding;
     abortController.abort();
     chunk.binding = null;
@@ -1182,7 +1181,6 @@ export default e => {
         } else {
           const localPosition = localVector.copy(localPlayer.position);
           localPosition.y -= localPlayer.avatar.height;
-          // console.log('got pos', localPosition.toArray().join(','), itemletMesh.position.toArray().join(','));
 
           if (localPosition.distanceTo(itemletMesh.position) < 0.5) {
             animation = {

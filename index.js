@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
-const {useFrame, useApp, useScene, useSound, useMaterials, useGeometryAllocators, useRenderer, useCamera, useProcGen, useDcWorkerManager, useLocalPlayer, useHitManager, useLodder} = metaversefile;
+const {useFrame, useApp, useScene, useSound, useMaterials, useMeshes, useGeometryAllocators, useRenderer, useCamera, useProcGen, useDcWorkerManager, useLocalPlayer, useHitManager, useLodder} = metaversefile;
 
 const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
 
@@ -225,17 +225,7 @@ const _makeRenderTarget = () => new THREE.WebGLRenderTarget(512, 512, {
   wrapT: THREE.ClampToEdgeWrapping,
   stencilBuffer: false,
 });
-class BatchedMesh extends THREE.InstancedMesh {
-  constructor(geometry, material, allocator) {
-    super(geometry, material);
-    
-    this.isBatchedMesh = true;
-    this.allocator = allocator;
-  }
-	getDrawSpec(multiDrawStarts, multiDrawCounts, multiDrawInstanceCounts) {
-    this.allocator.getDrawSpec(multiDrawStarts, multiDrawCounts, multiDrawInstanceCounts);
-  }
-}
+const {BatchedMesh} = useMeshes();
 class SilkGrassMesh extends BatchedMesh {
   constructor() {
     const {WebaverseShaderMaterial} = useMaterials();
@@ -522,14 +512,6 @@ class SilkGrassMesh extends BatchedMesh {
         context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
       }
     };
-    const _renderMain = timestamp => {
-      const timestampS = timestamp / 1000;
-      material.uniforms.uTime.value = timestampS;
-      material.uniforms.uTime.needsUpdate = true;
-
-      material.uniforms.uDisplacementMap.value = displacementMaps[1].texture;
-      material.uniforms.uDisplacementMap.needsUpdate = true;
-    };
     const _flipRenderTargets = () => {
       const temp = displacementMaps[0];
       displacementMaps[0] = displacementMaps[1];
@@ -552,9 +534,9 @@ class SilkGrassMesh extends BatchedMesh {
       maxInstancesPerDrawCall,
       maxDrawCallsPerGeometry,
     });
-    const {geometry, textures} = allocator;
-    for (const k in textures) {
-      const texture = textures[k];
+    const {geometry, textures: attributeTextures} = allocator;
+    for (const k in attributeTextures) {
+      const texture = attributeTextures[k];
       texture.anisotropy = maxAnisotropy;
     }
 
@@ -632,8 +614,8 @@ class SilkGrassMesh extends BatchedMesh {
         vec3 pos = position;
 
         int instanceIndex = gl_DrawID * ${maxInstancesPerDrawCall} + gl_InstanceID;
-        const float width = ${textures.p.image.width.toFixed(8)};
-        const float height = ${textures.p.image.height.toFixed(8)};
+        const float width = ${attributeTextures.p.image.width.toFixed(8)};
+        const float height = ${attributeTextures.p.image.height.toFixed(8)};
         float x = mod(float(instanceIndex), width);
         float y = floor(float(instanceIndex) / width);
         vec2 pUv = (vec2(x, y) + 0.5) / vec2(width, height);
@@ -827,11 +809,11 @@ class SilkGrassMesh extends BatchedMesh {
           needsUpdate: true,
         },
         pTexture: {
-          value: textures['p'],
+          value: attributeTextures['p'],
           needsUpdate: true,
         },
         qTexture: {
-          value: textures['q'],
+          value: attributeTextures['q'],
           needsUpdate: true,
         },
         /* uHeightfieldTexture: {
@@ -851,134 +833,117 @@ class SilkGrassMesh extends BatchedMesh {
     this.frustumCulled = false;
 
     this.allocator = allocator;
-    this.addChunk = async (chunk, {
-      signal,
-    } = {}) => {
-      if (chunk.y === 0) {
-        let live = true;
-        signal.addEventListener('abort', e => {
-          live = false;
-        });
+    this.displacementMaps = displacementMaps;
 
-        const _getGrassData = async () => {
-          const dcWorkerManager = useDcWorkerManager();
-          const lod = 1;
-          const result = await dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
-          return result;
-        };
-        const result = await _getGrassData();
-        if (!live) return;
+    this.cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
 
-        const _renderSilksGeometry = (drawCall, ps, qs) => {
-          // const procGen = useProcGen();
-          // const {alea} = procGen;
-          // const rng = alea('lol');
-          // const r = n => -n + rng() * 2 * n;
+    // window.silkGrassMesh = this;
 
-          const pTexture = drawCall.getTexture('p');
-          const pOffset = drawCall.getTextureOffset('p');
-          const qTexture = drawCall.getTexture('q');
-          const qOffset = drawCall.getTextureOffset('q');
-
-          pTexture.image.data.set(ps, pOffset);
-          qTexture.image.data.set(qs, qOffset);
-          
-          /* for (let i = 0; i < numBlades; i++) {
-            const pIndex = pOffset + i * 3;
-            localVector.copy(chunk)
-              .multiplyScalar(chunkWorldSize)
-              .add(localVector2.set(rng() * chunkWorldSize, 0, rng() * chunkWorldSize))
-              .toArray(pTexture.image.data, pIndex);
-            
-            const qIndex = qOffset + i * 4;
-            localQuaternion.setFromAxisAngle(upVector, r(Math.PI))
-              .toArray(qTexture.image.data, qIndex);
-          } */
-
-          drawCall.updateTexture('p', pOffset, ps.length);
-          drawCall.updateTexture('q', qOffset, qs.length);
-
-          drawCall.setInstanceCount(ps.length / 3);
-        };
-
-        const drawCall = allocator.allocDrawCall(0);
-        _renderSilksGeometry(drawCall, result.ps, result.qs);
-
-        signal.addEventListener('abort', e => {
-          allocator.freeDrawCall(drawCall);
-        });
-      }
-    };
-    this.update = (timestamp, timeDiff) => {
-      // XXX finish this
-
-      // console.log('update loop');
-
-      // _renderDisplacementMap();
-      // _renderMain(timestamp);
-      // _flipRenderTargets();
-    };
-
-    /* // debugging
-    {
-      const scene = useScene();
-      const cutMesh = _makeCutMesh();
-      cutMesh.frustumCulled = false;
-      scene.add(cutMesh);
-    } */
-
-    const cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
-    this.hitAttempt = (position, quaternion, target2D) => {
-      const pointA1 = position.clone()
-        .add(new THREE.Vector3(-1, cutHeightOffset, -0.1).applyQuaternion(quaternion));
-      const pointA2 = position.clone()
-        .add(new THREE.Vector3(-0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
-      const pointB1 = position.clone()
-        .add(new THREE.Vector3(1, cutHeightOffset, -0.1).applyQuaternion(quaternion));
-      const pointB2 = position.clone()
-        .add(new THREE.Vector3(0.7, -1.2, -1.5).applyQuaternion(quaternion));
-      /* [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
-        point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
+    /* this.onBeforeRender = () => {
+      console.log('silk grass render');
+    }; */
+  }
+  async addChunk(chunk, {
+    signal,
+  } = {}) {
+    if (chunk.y === 0) {
+      let live = true;
+      signal.addEventListener('abort', e => {
+        live = false;
       });
-      cutMesh.geometry.attributes.position.needsUpdate = true; */
 
-      const timestamp = performance.now();
-      _renderCut(pointA1, pointA2, pointB1, pointB2, timestamp);
-      _flipRenderTargets();
+      const _getGrassData = async () => {
+        const dcWorkerManager = useDcWorkerManager();
+        const lod = 1;
+        const result = await dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
+        return result;
+      };
+      const result = await _getGrassData();
+      if (!live) return;
 
-      const points = [
-        pointA1,
-        pointA2,
-        pointB1,
-        pointB2,
-      ];
-      const hitCenterPoint = _averagePoints(points, new THREE.Vector3());
-      const relativeX = Math.floor(hitCenterPoint.x);
-      const relativeZ = Math.floor(hitCenterPoint.z);    
+      const _renderSilksGeometry = (drawCall, ps, qs) => {
+        const pTexture = drawCall.getTexture('p');
+        const pOffset = drawCall.getTextureOffset('p');
+        const qTexture = drawCall.getTexture('q');
+        const qOffset = drawCall.getTextureOffset('q');
 
-      const meshWorldPosition = new THREE.Vector3().setFromMatrixPosition(this.matrixWorld);
-      const meshWorldMin = meshWorldPosition.clone().add(new THREE.Vector3(0, 0, 0));
-      const meshWorldMax = meshWorldPosition.clone().add(new THREE.Vector3(chunkWorldSize, 0, chunkWorldSize));
-      if (
-        relativeX >= meshWorldMin.x && relativeZ >= meshWorldMin.z &&
-        relativeX < meshWorldMax.x && relativeZ < meshWorldMax.z
-      ) {
-        const localX = relativeX - meshWorldMin.x;
-        const localZ = relativeZ - meshWorldMin.z;
-        const index = localX + localZ * chunkWorldSize;
-        const timeDiff = timestamp - cutLastTimestampMap[index];
-        if (timeDiff >= (cutTime + growTime / 2) * 1000) {
-          cutLastTimestampMap[index] = timestamp;
-          return target2D.set(relativeX + Math.random(), relativeZ + Math.random());
-        } else {
-          return null;
-        }
+        pTexture.image.data.set(ps, pOffset);
+        qTexture.image.data.set(qs, qOffset);
+
+        drawCall.updateTexture('p', pOffset, ps.length);
+        drawCall.updateTexture('q', qOffset, qs.length);
+
+        drawCall.setInstanceCount(ps.length / 3);
+      };
+
+      const drawCall = this.allocator.allocDrawCall(0);
+      _renderSilksGeometry(drawCall, result.ps, result.qs);
+
+      signal.addEventListener('abort', e => {
+        this.allocator.freeDrawCall(drawCall);
+      });
+    }
+  }
+  update(timestamp, timeDiff) {
+    // _renderDisplacementMap();
+    // _flipRenderTargets();
+
+    // update material
+    const timestampS = timestamp / 1000;
+    this.material.uniforms.uTime.value = timestampS;
+    this.material.uniforms.uTime.needsUpdate = true;
+
+    this.material.uniforms.uDisplacementMap.value = this.displacementMaps[1].texture;
+    this.material.uniforms.uDisplacementMap.needsUpdate = true;
+  }
+  hitAttempt(position, quaternion, target2D) {
+    const pointA1 = position.clone()
+      .add(new THREE.Vector3(-1, cutHeightOffset, -0.1).applyQuaternion(quaternion));
+    const pointA2 = position.clone()
+      .add(new THREE.Vector3(-0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
+    const pointB1 = position.clone()
+      .add(new THREE.Vector3(1, cutHeightOffset, -0.1).applyQuaternion(quaternion));
+    const pointB2 = position.clone()
+      .add(new THREE.Vector3(0.7, -1.2, -1.5).applyQuaternion(quaternion));
+    /* [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
+      point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
+    });
+    cutMesh.geometry.attributes.position.needsUpdate = true; */
+
+    const timestamp = performance.now();
+    _renderCut(pointA1, pointA2, pointB1, pointB2, timestamp);
+    _flipRenderTargets();
+
+    const points = [
+      pointA1,
+      pointA2,
+      pointB1,
+      pointB2,
+    ];
+    const hitCenterPoint = _averagePoints(points, new THREE.Vector3());
+    const relativeX = Math.floor(hitCenterPoint.x);
+    const relativeZ = Math.floor(hitCenterPoint.z);    
+
+    const meshWorldPosition = new THREE.Vector3().setFromMatrixPosition(this.matrixWorld);
+    const meshWorldMin = meshWorldPosition.clone().add(new THREE.Vector3(0, 0, 0));
+    const meshWorldMax = meshWorldPosition.clone().add(new THREE.Vector3(chunkWorldSize, 0, chunkWorldSize));
+    if (
+      relativeX >= meshWorldMin.x && relativeZ >= meshWorldMin.z &&
+      relativeX < meshWorldMax.x && relativeZ < meshWorldMax.z
+    ) {
+      const localX = relativeX - meshWorldMin.x;
+      const localZ = relativeZ - meshWorldMin.z;
+      const index = localX + localZ * chunkWorldSize;
+      const timeDiff = timestamp - this.cutLastTimestampMap[index];
+      if (timeDiff >= (cutTime + growTime / 2) * 1000) {
+        this.cutLastTimestampMap[index] = timestamp;
+        return target2D.set(relativeX + Math.random(), relativeZ + Math.random());
       } else {
         return null;
       }
-    };
-
-    // window.mesh = this;
+    } else {
+      return null;
+    }
   }
 };
 
@@ -993,9 +958,6 @@ class GrassChunkGenerator {
   getChunks() {
     return this.mesh;
   }
-  /* getMeshes() {
-    return this.chunks.children;
-  } */
   generateChunk(chunk) {
     const abortController = new AbortController();
     const {signal} = abortController;
@@ -1011,17 +973,12 @@ class GrassChunkGenerator {
     };
   }
   disposeChunk(chunk) {
-    // console.log('dispose chunk', chunk.toArray().join(','));
-
     const {abortController} = chunk.binding;
     abortController.abort();
     chunk.binding = null;
   }
   update(timestamp, timeDiff) {
     this.mesh.update(timestamp, timeDiff);
-    /* for (const mesh of this.getMeshes()) {
-      mesh.update(timestamp, timeDiff);
-    } */
   }
   destroy() {
     // nothing; the owning lod tracker disposes of our contents

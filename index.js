@@ -6,19 +6,19 @@ const {useFrame, useApp, useScene, useSound, useMaterials, useMeshes, useGeometr
 const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
 
 const localVector = new THREE.Vector3();
-const localVector2 = new THREE.Vector3();
-const localQuaternion = new THREE.Quaternion();
+// const localVector2 = new THREE.Vector3();
+// const localQuaternion = new THREE.Quaternion();
 const localEuler = new THREE.Euler();
 const localVector2D = new THREE.Vector2();
+// const localVector2D2 = new THREE.Vector2();
+// const localVector2D3 = new THREE.Vector2();
 
 const zeroVector = new THREE.Vector3(0, 0, 0);
-// const upVector = new THREE.Vector3(0, 1, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
 const dropItemSize = 0.2;
 const chunkWorldSize = 16;
-// const heightfieldRange = 3;
-// const heightfieldSize = chunkWorldSize * heightfieldRange;
-// const heightfieldPosition = new THREE.Vector4(-chunkWorldSize, -chunkWorldSize, heightfieldSize, heightfieldSize);
+const heightfieldRange = 2;
+const heightfieldSize = chunkWorldSize * heightfieldRange * 2;
 const numLods = 1;
 const maxAnisotropy = 16;
 
@@ -37,6 +37,9 @@ const cutHeightOffset = -1.4;
 const floorLimit = dropItemSize / 2;
 
 const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
+const heightfieldBase = new THREE.Vector3(-heightfieldSize / 2, 0, -heightfieldSize / 2);
+const heightfieldBase2D = new THREE.Vector2(heightfieldBase.x, heightfieldBase.z);
+const blankChunkData = new Float32Array(chunkWorldSize * chunkWorldSize);
 
 //
 
@@ -85,6 +88,10 @@ const _averagePoints = (points, target) => {
   }
   return target.divideScalar(points.length);
 };
+
+function mod(a, n) {
+  return (a % n + n) % n;
+}
 
 //
 
@@ -203,6 +210,13 @@ const createSilkGrassBladeGeometry = () => {
 };
 
 const silksBaseGeometry = createSilkGrassBladeGeometry();
+/* const blankChunkDataTexture = new THREE.DataTexture(
+  new Float32Array(chunkWorldSize * chunkWorldSize),
+  chunkWorldSize,
+  chunkWorldSize,
+  THREE.RedFormat,
+  THREE.FloatType
+); */
 /* const _makeCutMesh = () => {
   // const {WebaverseShaderMaterial} = useMaterials();
 
@@ -225,19 +239,380 @@ const _makeRenderTarget = () => new THREE.WebGLRenderTarget(512, 512, {
   wrapT: THREE.ClampToEdgeWrapping,
   stencilBuffer: false,
 });
+const _makeHeightfieldRenderTarget = () => new THREE.WebGLRenderTarget(heightfieldSize, heightfieldSize, {
+  minFilter: THREE.LinearFilter,
+  magFilter: THREE.LinearFilter,
+  // minFilter: THREE.NearestFilter,
+  // magFilter: THREE.NearestFilter,
+  format: THREE.RedFormat,
+  type: THREE.FloatType,
+  wrapS: THREE.RepeatWrapping,
+  wrapT: THREE.RepeatWrapping,
+  // wrapS: THREE.ClampToEdgeWrapping,
+  // wrapT: THREE.ClampToEdgeWrapping,
+  stencilBuffer: false,
+  anisotropy: maxAnisotropy,
+});
+const _getHeightfieldChunk = async (minX, minZ, lod) => {
+  const dcWorkerManager = useDcWorkerManager();
+  const heightfield = await dcWorkerManager.getHeightfieldRange(
+    minX, minZ,
+    chunkWorldSize, chunkWorldSize,
+    lod
+  );
+  return heightfield;
+};
 const {BatchedMesh} = useMeshes();
 class SilkGrassMesh extends BatchedMesh {
   constructor() {
     const {WebaverseShaderMaterial} = useMaterials();
     const {InstancedGeometryAllocator} = useGeometryAllocators();
 
-    // grass animation
-
     const displacementMaps = [
       _makeRenderTarget(),
       _makeRenderTarget(),
     ];
-    const displacementMapScene = (() => {
+    const allocator = new InstancedGeometryAllocator([
+      silksBaseGeometry,
+    ], [
+      {
+        name: 'p',
+        Type: Float32Array,
+        itemSize: 3,
+      },
+      {
+        name: 'q',
+        Type: Float32Array,
+        itemSize: 4,
+      },
+    ], {
+      maxInstancesPerDrawCall,
+      maxDrawCallsPerGeometry,
+    });
+    const {geometry, textures: attributeTextures} = allocator;
+    for (const k in attributeTextures) {
+      const texture = attributeTextures[k];
+      texture.anisotropy = maxAnisotropy;
+    }
+
+    // main material
+
+    const heightfieldRenderTarget = _makeHeightfieldRenderTarget();
+
+    const grassVertexShader = `\
+      precision highp float;
+      precision highp int;
+
+      uniform float uTime;
+      uniform sampler2D uDisplacementMap;
+      uniform sampler2D uNoiseTexture;
+      uniform sampler2D uSeamlessNoiseTexture;
+      uniform sampler2D pTexture;
+      uniform sampler2D qTexture;
+      uniform float uWindRotation;
+      uniform sampler2D uHeightfield;
+      uniform vec2 uHeightfieldBase;
+      uniform vec2 uHeightfieldPosition;
+      uniform float uChunkSize;
+      uniform float uHeightfieldSize;
+      // uniform float uHeightfieldRange;
+      attribute int segment;
+      varying vec2 vUv;
+      varying vec2 vUv2;
+      varying vec3 vNormal;
+      varying float vTimeDiff;
+      varying float vY;
+      varying vec3 vNoise;
+      // varying vec2 vColor;
+
+      vec4 quat_from_axis_angle(vec3 axis, float angle) { 
+        vec4 qr;
+        float half_angle = (angle * 0.5);
+        qr.x = axis.x * sin(half_angle);
+        qr.y = axis.y * sin(half_angle);
+        qr.z = axis.z * sin(half_angle);
+        qr.w = cos(half_angle);
+        return qr;
+      }
+
+      vec3 rotate_vertex_position(vec3 position, vec4 q) { 
+        return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
+      }
+
+      const float segmentHeight = ${segmentHeight.toFixed(8)};
+      const float heightSegments = ${heightSegments.toFixed(8)};  
+      const float topSegmentY = segmentHeight * heightSegments;
+      const float cutTime = ${cutTime.toFixed(8)};
+      const float growTime = ${growTime.toFixed(8)};
+      const float cutGrowTime = ${cutGrowTime.toFixed(8)};
+      void main() {
+        vec3 pos = position;
+
+        int instanceIndex = gl_DrawID * ${maxInstancesPerDrawCall} + gl_InstanceID;
+        const float width = ${attributeTextures.p.image.width.toFixed(8)};
+        const float height = ${attributeTextures.p.image.height.toFixed(8)};
+        float x = mod(float(instanceIndex), width);
+        float y = floor(float(instanceIndex) / width);
+        vec2 pUv = (vec2(x, y) + 0.5) / vec2(width, height);
+        vec3 p = texture2D(pTexture, pUv).xyz;
+        vec4 q = texture2D(qTexture, pUv).xyzw;
+
+        vUv = uv;
+        vUv2 = p.xz / ${chunkWorldSize.toFixed(8)};
+
+        // time diff
+        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
+        vTimeDiff = uTime - displacementColor.w;
+
+        // cut handling
+        float segmentStartY = float(segment) * segmentHeight;
+        float cutY = displacementColor.z;
+        float cutSegmentY = floor(cutY / segmentHeight) * segmentHeight;
+        bool isCuttableY = (cutY > 0. && cutY < segmentStartY);
+        bool isCut = isCuttableY && (vTimeDiff < cutTime);
+        bool isGrow = isCuttableY && (vTimeDiff >= cutTime && vTimeDiff < cutGrowTime);
+        if (isCut) {
+          vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
+          // float scaleFactor = max(1. - vTimeDiff / cutTime, 0.);
+
+          // acceleration / velocity
+          const float GRAVITY = -9.8;
+          const float CUT_VELOCITY = 2.;
+
+          vec2 vUv3 = mod(vUv2 * 3., 1.); // to not conflict with rotation axis
+          vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv3).xz * 2.;
+          
+          // compute the acceleration / velocity offset
+          vec3 gravityVector = vec3(0., GRAVITY * vTimeDiff * vTimeDiff * 0.5, 0.);
+          float cutSpeed = texture2D(uNoiseTexture, vUv2).w * 3.;
+          vec3 direction = vec3(directionXZ.x, CUT_VELOCITY, directionXZ.y);
+          vec3 velocityVector = direction * vTimeDiff * cutSpeed;
+
+          float centerOfBladePositionY = centerOfBlade.y + velocityVector.y + gravityVector.y;
+          if (centerOfBladePositionY >= 0.) {
+            // scale + rotation
+            pos -= centerOfBlade;
+            vec3 rotationAxis = normalize(-1. + texture2D(uNoiseTexture, vUv2).xyz * 2.);
+            vec4 q = quat_from_axis_angle(rotationAxis, uTime * 2. * PI * 0.2);
+            pos = rotate_vertex_position(pos, q);
+            pos += centerOfBlade;
+
+            // velocity + position
+            pos += velocityVector + gravityVector;
+          } else {
+            pos = vec3(0.);
+          }
+        } else if (isGrow) {
+          vec3 bottomOfBlade = vec3(0., cutSegmentY * 0.5, 0.);
+          float scaleFactor = min((vTimeDiff - cutTime) / growTime, 1.);
+
+          // grow
+          pos -= bottomOfBlade;
+          pos.y *= scaleFactor;
+          pos += bottomOfBlade;
+        }
+
+        vY = pos.y;
+        vNoise = texture2D(uNoiseTexture, vUv2).xyz;
+
+        // instance offset
+        {
+          pos = rotate_vertex_position(pos, q);
+          pos.xz += p.xz;
+        }
+
+        // wind
+        if (!isCut) {
+          float windOffsetX = texture2D(
+            uSeamlessNoiseTexture,
+            (vUv2 * 0.1) * 3. +
+              vec2(uTime * 0.05)
+          ).r * pos.y;
+          float windOffsetY = 0.;
+          float windOffsetZ = 0.;
+          vec3 windOffset = vec3(windOffsetX, windOffsetY, windOffsetZ);
+          vec4 q2 = quat_from_axis_angle(vec3(0., 1., 0.), uWindRotation);
+          windOffset = rotate_vertex_position(windOffset, q2);
+          pos += windOffset * 1.;
+        }
+
+        // displacement bend
+        if (!isCut) {
+          vec4 displacement = texture2D(uDisplacementMap, vUv2);
+          pos.xz += displacement.xy * pow(pos.y, 0.5) * 0.5;
+        }
+
+        // height offset
+        {
+          vec2 pos2D = p.xz;
+          // pos2D += 0.5;
+
+          const float overflowBuffer = 1.;
+          if (
+            (pos2D.x >= uHeightfieldPosition.x + overflowBuffer &&
+              pos2D.x <= uHeightfieldPosition.x + uHeightfieldSize - overflowBuffer) &&
+            (pos2D.y >= uHeightfieldPosition.y + overflowBuffer &&
+              pos2D.y <= uHeightfieldPosition.y + uHeightfieldSize - overflowBuffer)
+          ) {
+            vec2 posDiff = pos2D - uHeightfieldBase;
+            vec2 uvHeightfield = mod(posDiff, uHeightfieldSize) / uHeightfieldSize;
+            uvHeightfield += 0.5 / uHeightfieldSize; // offset to center of pixel
+            uvHeightfield.y = 1. - uvHeightfield.y;
+            float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
+            pos.y += heightfieldValue;
+            // pos.y += p.y;
+
+            // vColor = (uvHeightfield.x > 0. && uvHeightfield.x < 1.) ? uvHeightfield : vec2(0.);
+            // vColor = vec2(heightfieldValue * 10., 0.);
+          } else {
+            pos = vec3(0.);
+          }
+        }
+
+        // output
+        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        
+        vNormal = normal;
+      }
+    `;
+    const grassFragmentShader = `\
+      precision highp float;
+      precision highp int;
+
+      #define PI 3.1415926535897932384626433832795
+
+      uniform float uTime;
+      uniform sampler2D uDisplacementMap;
+      varying float vOffset;
+      varying vec2 vUv;
+      varying vec2 vUv2;
+      varying vec3 vNormal;
+      varying float vTimeDiff;
+      varying float vY;
+      varying vec3 vNoise;
+      // varying vec2 vColor;
+
+      vec3 hueShift( vec3 color, float hueAdjust ){
+        const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
+        const vec3  kRGBToI      = vec3 (0.596, -0.275, -0.321);
+        const vec3  kRGBToQ      = vec3 (0.212, -0.523, 0.311);
+
+        const vec3  kYIQToR     = vec3 (1.0, 0.956, 0.621);
+        const vec3  kYIQToG     = vec3 (1.0, -0.272, -0.647);
+        const vec3  kYIQToB     = vec3 (1.0, -1.107, 1.704);
+
+        float   YPrime  = dot (color, kRGBToYPrime);
+        float   I       = dot (color, kRGBToI);
+        float   Q       = dot (color, kRGBToQ);
+        float   hue     = atan (Q, I);
+        float   chroma  = sqrt (I * I + Q * Q);
+
+        hue += hueAdjust;
+
+        Q = chroma * sin (hue);
+        I = chroma * cos (hue);
+
+        vec3    yIQ   = vec3 (YPrime, I, Q);
+
+        return vec3( dot (yIQ, kYIQToR), dot (yIQ, kYIQToG), dot (yIQ, kYIQToB) );
+      }
+
+      float rand(float n){return fract(sin(n) * 43758.5453123);}
+
+      const float height = ${height.toFixed(8)};
+      const float cutTime = ${cutTime.toFixed(8)};
+      const vec3 color = vec3(${new THREE.Color(0x66bb6a).toArray().join(', ')});
+      void main() {
+        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
+        
+        // gl_FragColor.rgb = displacementColor.rgb;
+        gl_FragColor.rgb = color *
+          (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
+          (0.2 + vY/height * 0.8);
+        gl_FragColor.a = 1.;
+        // gl_FragColor.rb = vColor;
+        // gl_FragColor.g = 0.;
+      }
+    `;
+    const material = new WebaverseShaderMaterial({
+      uniforms: {
+        uTime: {
+          value: 0,
+          needsUpdate: true,
+        },
+        uDisplacementMap: {
+          value: displacementMaps[1].texture,
+          needsUpdate: true,
+        },
+        uNoiseTexture: {
+          value: getNoiseTexture(),
+          needsUpdate: true,
+        },
+        uSeamlessNoiseTexture: {
+          value: getSeamlessNoiseTexture(),
+          needsUpdate: true,
+        },
+        uWindRotation: {
+          value: windRotation,
+          needsUpdate: true,
+        },
+        pTexture: {
+          value: attributeTextures['p'],
+          needsUpdate: true,
+        },
+        qTexture: {
+          value: attributeTextures['q'],
+          needsUpdate: true,
+        },
+        uHeightfield: {
+          value: heightfieldRenderTarget.texture,
+          needsUpdate: true,
+        },
+        uHeightfieldBase: {
+          value: heightfieldBase2D,
+          needsUpdate: true,
+        },
+        uHeightfieldPosition: {
+          value: new THREE.Vector2(),
+          needsUpdate: true,
+        },
+        uChunkSize: {
+          value: chunkWorldSize,
+          needsUpdate: true,
+        },
+        uHeightfieldSize: {
+          value: heightfieldSize,
+          needsUpdate: true,
+        },
+        /* uHeightfieldRange: {
+          value: heightfieldRange,
+          needsUpdate: true,
+        }, */
+      },
+      vertexShader: grassVertexShader,
+      fragmentShader: grassFragmentShader,
+      // transparent: true,
+    });
+    super(geometry, material, allocator);
+    this.frustumCulled = false;
+
+    // local members
+
+    this.allocator = allocator;
+    this.displacementMaps = displacementMaps;
+    this.cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
+
+    // update functions
+
+    this.updateCoord = coord => {
+      material.uniforms.uHeightfieldPosition.value.set(coord.x, coord.z)
+        .multiplyScalar(chunkWorldSize)
+        .add(localVector2D.set(-heightfieldSize / 2, -heightfieldSize / 2));
+      material.uniforms.uHeightfieldPosition.needsUpdate = true;
+      // console.log('update heightfield position', material.uniforms.uHeightfieldPosition.value.toArray().join(','));
+    };
+    const animationScene = (() => {
       const fullscreenFragmentShader = `\
         uniform vec3 uPlayerPosition;
         uniform vec3 uWorldPosition;
@@ -333,7 +708,7 @@ class SilkGrassMesh extends BatchedMesh {
         fullscreenMaterial.uniforms.uPlayerPosition.value.copy(localPlayer.position);
         fullscreenMaterial.uniforms.uPlayerPosition.needsUpdate = true;
 
-        fullscreenMaterial.uniforms.uWorldPosition.value.setFromMatrixPosition(mesh.matrixWorld);
+        fullscreenMaterial.uniforms.uWorldPosition.value.setFromMatrixPosition(this.matrixWorld);
         fullscreenMaterial.uniforms.uWorldPosition.needsUpdate = true;
 
         fullscreenMaterial.uniforms.uDisplacementMap.value = displacementMaps[0].texture;
@@ -341,7 +716,7 @@ class SilkGrassMesh extends BatchedMesh {
       };
       return scene;
     })();
-    const displacementMapScene2 = (() => {
+    const cutScene = (() => {
       const fullscreenFragmentShader2 = `\
         uniform vec3 uWorldPosition;
         uniform sampler2D uDisplacementMap;
@@ -466,14 +841,105 @@ class SilkGrassMesh extends BatchedMesh {
       };
       return scene2;
     })();
-    const _renderDisplacementMap = () => {
+    const heightfieldScene = (() => {
+      const chunkPlaneGeometry = new THREE.PlaneBufferGeometry(1, 1)
+        .rotateX(-Math.PI / 2)
+        .translate(0.5, 0, 0.5)
+        .scale(chunkWorldSize, 1, chunkWorldSize);
+      const fullscreenMatrixVertexShader = `\
+        uniform float uHeightfieldSize;  
+        varying vec2 vUv;
+      
+        void main() {
+          vUv = uv;
+          vUv.y = 1. - vUv.y;
+          // vUv += 0.5 / uHeightfieldSize;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `;
+      const fullscreenFragmentShader3 = `\
+        uniform sampler2D uHeightfieldDrawTexture;
+        uniform float uHeightfieldSize;
+        varying vec2 vUv;
+
+        void main() {
+          vec2 uv = vUv;
+          // uv.x += 0.5 / uHeightfieldSize;
+          // uv.y -= 0.5 / uHeightfieldSize;
+          // uv += 0.5 / uHeightfieldSize;
+          float heightValue = texture2D(uHeightfieldDrawTexture, uv).r;
+          
+          gl_FragColor.rgb = vec3(heightValue);
+          gl_FragColor.a = 1.;
+        }
+      `;
+      const heightfieldDrawTexture = new THREE.DataTexture(
+        new Float32Array(chunkWorldSize * chunkWorldSize),
+        chunkWorldSize,
+        chunkWorldSize,
+        THREE.RedFormat,
+        THREE.FloatType
+      );
+      heightfieldDrawTexture.minFilter = THREE.LinearFilter;
+      heightfieldDrawTexture.magFilter = THREE.LinearFilter;
+      const fullscreenMaterial3 = new WebaverseShaderMaterial({
+        uniforms: {
+          uHeightfieldDrawTexture: {
+            value: heightfieldDrawTexture,
+            needsUpdate: true,
+          },
+          uHeightfieldSize: {
+            value: heightfieldSize,
+            needsUpdate: true,
+          },
+        },
+        vertexShader: fullscreenMatrixVertexShader,
+        fragmentShader: fullscreenFragmentShader3,
+        // side: THREE.DoubleSide,
+      });
+      const fullscreenQuadMesh3 = new THREE.Mesh(chunkPlaneGeometry, fullscreenMaterial3);
+      fullscreenQuadMesh3.frustumCulled = false;
+      const scene3 = new THREE.Scene();
+      scene3.add(fullscreenQuadMesh3);
+      scene3.update = (heightfieldLocalWritePosition, heightfield = blankChunkData) => {
+        fullscreenQuadMesh3.position.copy(heightfieldLocalWritePosition);
+        fullscreenQuadMesh3.updateMatrixWorld();
+        
+        // window.fullscreenQuadMesh3 = fullscreenQuadMesh3;
+
+        /* const heightfieldDrawTexture = new THREE.DataTexture(
+          new Uint8ClampedArray(chunkWorldSize * chunkWorldSize),
+          chunkWorldSize,
+          chunkWorldSize,
+          THREE.RedFormat,
+          THREE.UnsignedByteType
+        ); */
+
+        heightfieldDrawTexture.image.data.set(heightfield);
+        heightfieldDrawTexture.needsUpdate = true;
+
+        // fullscreenMaterial3.uniforms.uHeightfieldDrawTexture.value = heightfieldDrawTexture;
+        // fullscreenMaterial3.uniforms.uHeightfieldDrawTexture.needsUpdate = true;
+
+        // console.log('got data', fullscreenQuadMesh3.position.x, fullscreenQuadMesh3.position.z, heightfieldDrawTexture.image.data);
+
+        // console.log('render heightfield', heightfieldLocalWritePosition.x, heightfieldLocalWritePosition.y, heightfield);
+      };
+      scene3.camera = new THREE.OrthographicCamera(0, heightfieldSize, 0, -heightfieldSize, -1000, 1000);
+      // scene3.camera.position.y = 1;
+      scene3.camera.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+      // scene3.add(scene3.camera);
+      scene3.camera.updateMatrixWorld();
+      return scene3;
+    })();
+    this.renderAnimation = () => {
       const renderer = useRenderer();
       const context = renderer.getContext();
       const camera = useCamera();
 
       {
         // update
-        displacementMapScene.update();
+        animationScene.update();
 
         // push state
         const oldRenderTarget = renderer.getRenderTarget();
@@ -482,21 +948,21 @@ class SilkGrassMesh extends BatchedMesh {
         // render
         renderer.setRenderTarget(displacementMaps[1]);
         renderer.clear();
-        renderer.render(displacementMapScene, camera);
+        renderer.render(animationScene, camera);
 
         // pop state
         renderer.setRenderTarget(oldRenderTarget);
         context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
       }
     };
-    const _renderCut = (pA1, pA2, pB1, pB2, timestamp) => {
+    this.renderCut = (pA1, pA2, pB1, pB2, timestamp) => {
       const renderer = useRenderer();
       const context = renderer.getContext();
       const camera = useCamera();
 
       {
         // update
-        displacementMapScene2.update(pA1, pA2, pB1, pB2, timestamp);
+        cutScene.update(pA1, pA2, pB1, pB2, timestamp);
         
         // push state
         const oldRenderTarget = renderer.getRenderTarget();
@@ -505,343 +971,81 @@ class SilkGrassMesh extends BatchedMesh {
         // render
         renderer.setRenderTarget(displacementMaps[1]);
         renderer.clear();
-        renderer.render(displacementMapScene2, camera);
+        renderer.render(cutScene, camera);
 
         // pop state
         renderer.setRenderTarget(oldRenderTarget);
         context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
       }
     };
-    const _flipRenderTargets = () => {
+    this.flipRenderTargets = () => {
       const temp = displacementMaps[0];
       displacementMaps[0] = displacementMaps[1];
       displacementMaps[1] = temp;
     };
-    const allocator = new InstancedGeometryAllocator([
-      silksBaseGeometry,
-    ], [
-      {
-        name: 'p',
-        Type: Float32Array,
-        itemSize: 3,
-      },
-      {
-        name: 'q',
-        Type: Float32Array,
-        itemSize: 4,
-      },
-    ], {
-      maxInstancesPerDrawCall,
-      maxDrawCallsPerGeometry,
-    });
-    const {geometry, textures: attributeTextures} = allocator;
-    for (const k in attributeTextures) {
-      const texture = attributeTextures[k];
-      texture.anisotropy = maxAnisotropy;
-    }
 
-    // main material
-    
-    /* const heightfieldTexture = new THREE.DataTexture(null, heightfieldSize, heightfieldSize, THREE.RedFormat, THREE.FloatType);
-    heightfieldTexture.minFilter = THREE.LinearFilter;
-    heightfieldTexture.magFilter = THREE.LinearFilter;
-    heightfieldTexture.wrapS = THREE.ClampToEdgeWrapping;
-    heightfieldTexture.wrapT = THREE.ClampToEdgeWrapping;
-    heightfieldTexture.anisotropy = maxAnisotropy;
-    const _getHeightfieldAsync = async () => {
-      const dcWorkerManager = useDcWorkerManager();
-      const lod = 1;
-      const heightfield = await dcWorkerManager.getHeightfieldRange(
-        heightfieldPosition.x,
-        heightfieldPosition.y,
-        heightfieldSize,
-        heightfieldSize,
-        lod
-      );
-      return heightfield;
+    this.renderHeightfieldUpdate = (worldModPosition, heightfield) => {
+      const renderer = useRenderer();
+      const context = renderer.getContext();
+      // const camera = useCamera();
+
+      {
+        // update
+        heightfieldScene.update(worldModPosition, heightfield);
+        
+        // push state
+        const oldRenderTarget = renderer.getRenderTarget();
+        context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
+
+        // render
+        renderer.setRenderTarget(heightfieldRenderTarget);
+        // renderer.clear();
+        renderer.render(heightfieldScene, heightfieldScene.camera);
+
+        // pop state
+        renderer.setRenderTarget(oldRenderTarget);
+        context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
+      }
     };
-    (async () => {
-      const heightfield = await _getHeightfieldAsync();
-      heightfieldTexture.image.data = heightfield;
-      heightfieldTexture.needsUpdate = true;
-      // console.log('load heightfield', heightfieldTexture);
-    })(); */
+    this.clearHeightfieldChunk = (worldModPosition) => {
+      const renderer = useRenderer();
+      const context = renderer.getContext();
+      // const camera = useCamera();
 
-    const grassVertexShader = `\
-      precision highp float;
-      precision highp int;
-
-      uniform float uTime;
-      uniform sampler2D uDisplacementMap;
-      uniform sampler2D uNoiseTexture;
-      uniform sampler2D uSeamlessNoiseTexture;
-      uniform sampler2D pTexture;
-      uniform sampler2D qTexture;
-      uniform float uWindRotation;
-      uniform sampler2D uHeightfieldTexture;
-      uniform vec4 uHeightfieldPosition;
-      // attribute vec3 p;
-      // attribute vec4 q;
-      attribute int segment;
-      varying vec2 vUv;
-      varying vec2 vUv2;
-      varying vec3 vNormal;
-      varying float vTimeDiff;
-      varying float vY;
-      varying vec3 vNoise;
-
-      vec4 quat_from_axis_angle(vec3 axis, float angle) { 
-        vec4 qr;
-        float half_angle = (angle * 0.5);
-        qr.x = axis.x * sin(half_angle);
-        qr.y = axis.y * sin(half_angle);
-        qr.z = axis.z * sin(half_angle);
-        qr.w = cos(half_angle);
-        return qr;
-      }
-
-      vec3 rotate_vertex_position(vec3 position, vec4 q) { 
-        return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
-      }
-
-      const float segmentHeight = ${segmentHeight.toFixed(8)};
-      const float heightSegments = ${heightSegments.toFixed(8)};  
-      const float topSegmentY = segmentHeight * heightSegments;
-      const float cutTime = ${cutTime.toFixed(8)};
-      const float growTime = ${growTime.toFixed(8)};
-      const float cutGrowTime = ${cutGrowTime.toFixed(8)};
-      void main() {
-        vec3 pos = position;
-
-        int instanceIndex = gl_DrawID * ${maxInstancesPerDrawCall} + gl_InstanceID;
-        const float width = ${attributeTextures.p.image.width.toFixed(8)};
-        const float height = ${attributeTextures.p.image.height.toFixed(8)};
-        float x = mod(float(instanceIndex), width);
-        float y = floor(float(instanceIndex) / width);
-        vec2 pUv = (vec2(x, y) + 0.5) / vec2(width, height);
-        vec3 p = texture2D(pTexture, pUv).xyz;
-        vec4 q = texture2D(qTexture, pUv).xyzw;
-
-        // p.y += float(gl_DrawID);
-        // p.x += float(gl_InstanceID);
-
-        vUv = uv;
-        vUv2 = p.xz / ${chunkWorldSize.toFixed(8)};
-
-        // time diff
-        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
-        vTimeDiff = uTime - displacementColor.w;
-
-        // cut handling
-        float segmentStartY = float(segment) * segmentHeight;
-        float cutY = displacementColor.z;
-        float cutSegmentY = floor(cutY / segmentHeight) * segmentHeight;
-        bool isCuttableY = (cutY > 0. && cutY < segmentStartY);
-        bool isCut = isCuttableY && (vTimeDiff < cutTime);
-        bool isGrow = isCuttableY && (vTimeDiff >= cutTime && vTimeDiff < cutGrowTime);
-        if (isCut) {
-          vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
-          // float scaleFactor = max(1. - vTimeDiff / cutTime, 0.);
-
-          // acceleration / velocity
-          const float GRAVITY = -9.8;
-          const float CUT_VELOCITY = 2.;
-
-          vec2 vUv3 = mod(vUv2 * 3., 1.); // to not conflict with rotation axis
-          vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv3).xz * 2.;
-          
-          // compute the acceleration / velocity offset
-          vec3 gravityVector = vec3(0., GRAVITY * vTimeDiff * vTimeDiff * 0.5, 0.);
-          float cutSpeed = texture2D(uNoiseTexture, vUv2).w * 3.;
-          vec3 direction = vec3(directionXZ.x, CUT_VELOCITY, directionXZ.y);
-          vec3 velocityVector = direction * vTimeDiff * cutSpeed;
-
-          float centerOfBladePositionY = centerOfBlade.y + velocityVector.y + gravityVector.y;
-          if (centerOfBladePositionY >= 0.) {
-            // scale + rotation
-            pos -= centerOfBlade;
-            vec3 rotationAxis = normalize(-1. + texture2D(uNoiseTexture, vUv2).xyz * 2.);
-            vec4 q = quat_from_axis_angle(rotationAxis, uTime * 2. * PI * 0.2);
-            pos = rotate_vertex_position(pos, q);
-            pos += centerOfBlade;
-
-            // velocity + position
-            pos += velocityVector + gravityVector;
-          } else {
-            pos = vec3(0.);
-          }
-        } else if (isGrow) {
-          vec3 bottomOfBlade = vec3(0., cutSegmentY * 0.5, 0.);
-          float scaleFactor = min((vTimeDiff - cutTime) / growTime, 1.);
-
-          // grow
-          pos -= bottomOfBlade;
-          pos.y *= scaleFactor;
-          pos += bottomOfBlade;
-        }
-
-        vY = pos.y;
-        vNoise = texture2D(uNoiseTexture, vUv2).xyz;
-
-        // instance offset
-        {
-          pos = rotate_vertex_position(pos, q);
-          pos.xz += p.xz;
-        }
-
-        // wind
-        if (!isCut) {
-          float windOffsetX = texture2D(
-            uSeamlessNoiseTexture,
-            (vUv2 * 0.1) * 3. +
-              vec2(uTime * 0.05)
-          ).r * pos.y;
-          float windOffsetY = 0.;
-          float windOffsetZ = 0.;
-          vec3 windOffset = vec3(windOffsetX, windOffsetY, windOffsetZ);
-          vec4 q2 = quat_from_axis_angle(vec3(0., 1., 0.), uWindRotation);
-          windOffset = rotate_vertex_position(windOffset, q2);
-          pos += windOffset * 1.;
-        }
-
-        // displacement bend
-        if (!isCut) {
-          vec4 displacement = texture2D(uDisplacementMap, vUv2);
-          pos.xz += displacement.xy * pow(pos.y, 0.5) * 0.5;
-        }
-
-        // height offset
-        /* {
-          vec2 heightfieldMin = uHeightfieldPosition.xy;
-          vec2 heightfieldMax = uHeightfieldPosition.zw;
-          vec2 heightUv = (p.xz - heightfieldMin) / (heightfieldMax - heightfieldMin);
-          if (heightUv.x >= 0. && heightUv.x < 1. && heightUv.y >= 0. && heightUv.y < 1.) {
-            pos.y += texture2D(uHeightfieldTexture, heightUv).r;
-          }
-        } */
-        {
-          pos.y += p.y;
-        }
-
-        // output
-        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-        gl_Position = projectionMatrix * mvPosition;
+      {
+        // update
+        heightfieldScene.update(worldModPosition);
         
-        vNormal = normal;
+        // push state
+        const oldRenderTarget = renderer.getRenderTarget();
+        context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
+
+        // render
+        renderer.setRenderTarget(heightfieldRenderTarget);
+        // renderer.clear();
+        renderer.render(heightfieldScene, heightfieldScene.camera);
+
+        // pop state
+        renderer.setRenderTarget(oldRenderTarget);
+        context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
       }
-    `;
-    const grassFragmentShader = `\
-      precision highp float;
-      precision highp int;
+    };
+    this.heightfieldRenderTarget = heightfieldRenderTarget;
 
-      #define PI 3.1415926535897932384626433832795
-
-      uniform float uTime;
-      uniform sampler2D uDisplacementMap;
-      varying float vOffset;
-      varying vec2 vUv;
-      varying vec2 vUv2;
-      varying vec3 vNormal;
-      varying float vTimeDiff;
-      varying float vY;
-      varying vec3 vNoise;
-
-      vec3 hueShift( vec3 color, float hueAdjust ){
-        const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
-        const vec3  kRGBToI      = vec3 (0.596, -0.275, -0.321);
-        const vec3  kRGBToQ      = vec3 (0.212, -0.523, 0.311);
-
-        const vec3  kYIQToR     = vec3 (1.0, 0.956, 0.621);
-        const vec3  kYIQToG     = vec3 (1.0, -0.272, -0.647);
-        const vec3  kYIQToB     = vec3 (1.0, -1.107, 1.704);
-
-        float   YPrime  = dot (color, kRGBToYPrime);
-        float   I       = dot (color, kRGBToI);
-        float   Q       = dot (color, kRGBToQ);
-        float   hue     = atan (Q, I);
-        float   chroma  = sqrt (I * I + Q * Q);
-
-        hue += hueAdjust;
-
-        Q = chroma * sin (hue);
-        I = chroma * cos (hue);
-
-        vec3    yIQ   = vec3 (YPrime, I, Q);
-
-        return vec3( dot (yIQ, kYIQToR), dot (yIQ, kYIQToG), dot (yIQ, kYIQToB) );
-      }
-
-      float rand(float n){return fract(sin(n) * 43758.5453123);}
-
-      const float height = ${height.toFixed(8)};
-      const float cutTime = ${cutTime.toFixed(8)};
-      const vec3 color = vec3(${new THREE.Color(0x66bb6a).toArray().join(', ')});
-      void main() {
-        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
-        
-        // gl_FragColor.rgb = displacementColor.rgb;
-        gl_FragColor.rgb = color *
-          (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
-          (0.2 + vY/height * 0.8);
-        gl_FragColor.a = 1.;
-      }
-    `;
-    const material = new WebaverseShaderMaterial({
-      uniforms: {
-        uTime: {
-          value: 0,
-          needsUpdate: true,
-        },
-        uDisplacementMap: {
-          value: displacementMaps[1].texture,
-          needsUpdate: true,
-        },
-        uNoiseTexture: {
-          value: getNoiseTexture(),
-          needsUpdate: true,
-        },
-        uSeamlessNoiseTexture: {
-          value: getSeamlessNoiseTexture(),
-          needsUpdate: true,
-        },
-        uWindRotation: {
-          value: windRotation,
-          needsUpdate: true,
-        },
-        pTexture: {
-          value: attributeTextures['p'],
-          needsUpdate: true,
-        },
-        qTexture: {
-          value: attributeTextures['q'],
-          needsUpdate: true,
-        },
-        /* uHeightfieldTexture: {
-          value: heightfieldTexture,
-          needsUpdate: true,
-        },
-        uHeightfieldPosition: {
-          value: heightfieldPosition,
-          needsUpdate: true,
-        }, */
-      },
-      vertexShader: grassVertexShader,
-      fragmentShader: grassFragmentShader,
-      // transparent: true,
-    });
-    super(geometry, material, allocator);
-    this.frustumCulled = false;
-
-    this.allocator = allocator;
-    this.displacementMaps = displacementMaps;
-
-    this.cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
-
-    // window.silkGrassMesh = this;
-
-    /* this.onBeforeRender = () => {
-      console.log('silk grass render');
-    }; */
+    // XXX debugging
+    const heightfieldMesh = (() => {
+      const geometry = new THREE.PlaneBufferGeometry(1, 1);
+      const material = new THREE.MeshBasicMaterial({
+        map: heightfieldRenderTarget.texture,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.frustumCulled = false;
+      return mesh;
+    })();
+    const scene = useScene();
+    scene.add(heightfieldMesh);
+    heightfieldMesh.updateMatrixWorld();
+    this.heightfieldMesh = heightfieldMesh;
   }
   async addChunk(chunk, {
     signal,
@@ -852,41 +1056,85 @@ class SilkGrassMesh extends BatchedMesh {
         live = false;
       });
 
-      const _getGrassData = async () => {
-        const dcWorkerManager = useDcWorkerManager();
-        const lod = 1;
-        const result = await dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
-        return result;
-      };
-      const result = await _getGrassData();
-      if (!live) return;
+      await Promise.all([
+        (async () => {
+          const _getGrassData = async () => {
+            const dcWorkerManager = useDcWorkerManager();
+            const lod = 1;
+            const result = await dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
+            return result;
+          };
+          const result = await _getGrassData();
+          if (!live) return;
+    
+          const _renderSilksGeometry = (drawCall, ps, qs) => {
+            const pTexture = drawCall.getTexture('p');
+            const pOffset = drawCall.getTextureOffset('p');
+            const qTexture = drawCall.getTexture('q');
+            const qOffset = drawCall.getTextureOffset('q');
+    
+            pTexture.image.data.set(ps, pOffset);
+            qTexture.image.data.set(qs, qOffset);
+    
+            drawCall.updateTexture('p', pOffset, ps.length);
+            drawCall.updateTexture('q', qOffset, qs.length);
+    
+            drawCall.setInstanceCount(ps.length / 3);
+          };
+    
+          const drawCall = this.allocator.allocDrawCall(0);
+          _renderSilksGeometry(drawCall, result.ps, result.qs);
+    
+          signal.addEventListener('abort', e => {
+            this.allocator.freeDrawCall(drawCall);
+          });
+        })(),
+        (async () => {
+          const lod = 1;
+          const heightfield = await _getHeightfieldChunk(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
+          if (!live) return;
+          // console.log('got heightfield', chunk.x, chunk.z, heightfield);
 
-      const _renderSilksGeometry = (drawCall, ps, qs) => {
-        const pTexture = drawCall.getTexture('p');
-        const pOffset = drawCall.getTextureOffset('p');
-        const qTexture = drawCall.getTexture('q');
-        const qOffset = drawCall.getTextureOffset('q');
+          // chunkDataTexture.image.data.set(heightfield);
 
-        pTexture.image.data.set(ps, pOffset);
-        qTexture.image.data.set(qs, qOffset);
+          // const renderer = useRenderer();
+          // const heightfieldMin = this.material.uniforms.uHeightfieldPosition.value;
 
-        drawCall.updateTexture('p', pOffset, ps.length);
-        drawCall.updateTexture('q', qOffset, qs.length);
+          const _getWorldModPosition = target => {
+            target.set(chunk.x * chunkWorldSize, 0, chunk.z * chunkWorldSize)
+              .sub(heightfieldBase);
+            target.x = mod(target.x, heightfieldSize);
+            target.z = mod(target.z, heightfieldSize);
+            return target;
+          };
+          const position = _getWorldModPosition(localVector);
 
-        drawCall.setInstanceCount(ps.length / 3);
-      };
+          // console.log('render update', position.x, position.y);
 
-      const drawCall = this.allocator.allocDrawCall(0);
-      _renderSilksGeometry(drawCall, result.ps, result.qs);
+          this.renderHeightfieldUpdate(position, heightfield);
+          
+          /* if (position.x < 0 || position.y < 0) {
+            debugger;
+          }
+          // console.log('copy position', position.x, position.y);
+          renderer.copyTextureToTexture(position, chunkDataTexture, this.material.uniforms.uHeightfield.value); */
 
-      signal.addEventListener('abort', e => {
-        this.allocator.freeDrawCall(drawCall);
-      });
+          signal.addEventListener('abort', e => {
+            const position = _getWorldModPosition(localVector);
+            this.clearHeightfieldChunk(position);
+            /* const renderer = useRenderer();
+            const heightfieldMin = this.material.uniforms.uHeightfieldPosition.value;
+            const chunkPosition = localVector2D2.set(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize);
+            const position = localVector2D3.copy(chunkPosition).sub(heightfieldMin);
+            renderer.copyTextureToTexture(position, blankChunkDataTexture, this.material.uniforms.uHeightfield.value); */
+          });
+        })(),
+      ]);
     }
   }
   update(timestamp, timeDiff) {
-    // _renderDisplacementMap();
-    // _flipRenderTargets();
+    this.renderAnimation();
+    this.flipRenderTargets();
 
     // update material
     const timestampS = timestamp / 1000;
@@ -895,6 +1143,13 @@ class SilkGrassMesh extends BatchedMesh {
 
     this.material.uniforms.uDisplacementMap.value = this.displacementMaps[1].texture;
     this.material.uniforms.uDisplacementMap.needsUpdate = true;
+
+    // XXX debugging
+    const camera = useCamera();
+    this.heightfieldMesh.position.copy(camera.position)
+      .add(localVector.set(0, 0.5, -2).applyQuaternion(camera.quaternion));
+    this.heightfieldMesh.quaternion.copy(camera.quaternion);
+    this.heightfieldMesh.updateMatrixWorld();
   }
   hitAttempt(position, quaternion, target2D) {
     const pointA1 = position.clone()
@@ -911,8 +1166,8 @@ class SilkGrassMesh extends BatchedMesh {
     cutMesh.geometry.attributes.position.needsUpdate = true; */
 
     const timestamp = performance.now();
-    _renderCut(pointA1, pointA2, pointB1, pointB2, timestamp);
-    _flipRenderTargets();
+    this.renderCut(pointA1, pointA2, pointB1, pointB2, timestamp);
+    this.flipRenderTargets();
 
     const points = [
       pointA1,
@@ -1004,6 +1259,11 @@ export default e => {
   const chunksMesh = generator.getChunks();
   app.add(chunksMesh);
   chunksMesh.updateMatrixWorld();
+
+  tracker.addEventListener('coordupdate', e => {
+    const {coord} = e.data;
+    chunksMesh.updateCoord(coord);
+  });
 
   useFrame(() => {
     const localPlayer = useLocalPlayer();

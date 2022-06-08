@@ -1032,7 +1032,7 @@ class SilkGrassMesh extends BatchedMesh {
     };
     this.heightfieldRenderTarget = heightfieldRenderTarget;
 
-    // XXX debugging
+    /* // XXX debugging
     const heightfieldMesh = (() => {
       const geometry = new THREE.PlaneBufferGeometry(1, 1);
       const material = new THREE.MeshBasicMaterial({
@@ -1045,7 +1045,7 @@ class SilkGrassMesh extends BatchedMesh {
     const scene = useScene();
     scene.add(heightfieldMesh);
     heightfieldMesh.updateMatrixWorld();
-    this.heightfieldMesh = heightfieldMesh;
+    this.heightfieldMesh = heightfieldMesh; */
   }
   async addChunk(chunk, {
     signal,
@@ -1144,12 +1144,12 @@ class SilkGrassMesh extends BatchedMesh {
     this.material.uniforms.uDisplacementMap.value = this.displacementMaps[1].texture;
     this.material.uniforms.uDisplacementMap.needsUpdate = true;
 
-    // XXX debugging
+    /* // XXX debugging
     const camera = useCamera();
     this.heightfieldMesh.position.copy(camera.position)
       .add(localVector.set(0, 0.5, -2).applyQuaternion(camera.quaternion));
     this.heightfieldMesh.quaternion.copy(camera.quaternion);
-    this.heightfieldMesh.updateMatrixWorld();
+    this.heightfieldMesh.updateMatrixWorld(); */
   }
   hitAttempt(position, quaternion, target2D) {
     const pointA1 = position.clone()

@@ -468,8 +468,8 @@ class SilkGrassMesh extends BatchedMesh {
         }
 
         // height offset
-        pos = offsetHeight1(pos, p);
-        // pos = offsetHeight2(pos, p);
+        // pos = offsetHeight1(pos, p);
+        pos = offsetHeight2(pos, p);
 
         // output
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);

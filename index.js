@@ -246,12 +246,13 @@ const _makeHeightfieldRenderTarget = () => new THREE.WebGLRenderTarget(heightfie
   // magFilter: THREE.NearestFilter,
   format: THREE.RedFormat,
   type: THREE.FloatType,
-  wrapS: THREE.RepeatWrapping,
-  wrapT: THREE.RepeatWrapping,
-  // wrapS: THREE.ClampToEdgeWrapping,
-  // wrapT: THREE.ClampToEdgeWrapping,
+  // wrapS: THREE.RepeatWrapping,
+  // wrapT: THREE.RepeatWrapping,
+  wrapS: THREE.ClampToEdgeWrapping,
+  wrapT: THREE.ClampToEdgeWrapping,
   stencilBuffer: false,
   anisotropy: maxAnisotropy,
+  // flipY: false,
 });
 const _getHeightfieldChunk = async (minX, minZ, lod) => {
   const dcWorkerManager = useDcWorkerManager();
@@ -298,6 +299,8 @@ class SilkGrassMesh extends BatchedMesh {
     // main material
 
     const heightfieldRenderTarget = _makeHeightfieldRenderTarget();
+    // heightfieldRenderTarget.texture.flipY = false;
+    // window.heightfieldRenderTarget = heightfieldRenderTarget;
 
     const grassVertexShader = `\
       precision highp float;
@@ -342,6 +345,7 @@ class SilkGrassMesh extends BatchedMesh {
       vec3 offsetHeight1(vec3 pos, vec3 offset) {
         vec2 pos2D = offset.xz;
         const float overflowBuffer = 1.;
+        // pos2D += 0.5;
         if (
           (pos2D.x >= uHeightfieldPosition.x + overflowBuffer &&
             pos2D.x <= uHeightfieldPosition.x + uHeightfieldSize - overflowBuffer) &&
@@ -349,9 +353,12 @@ class SilkGrassMesh extends BatchedMesh {
             pos2D.y <= uHeightfieldPosition.y + uHeightfieldSize - overflowBuffer)
         ) {
           vec2 posDiff = pos2D - uHeightfieldBase;
-          vec2 uvHeightfield = mod(posDiff, uHeightfieldSize) / uHeightfieldSize;
-          uvHeightfield += 0.5 / uHeightfieldSize; // offset to center of pixel
-          uvHeightfield.y = 1. - uvHeightfield.y;
+          vec2 uvHeightfield = posDiff;
+          uvHeightfield.y = uHeightfieldSize - uvHeightfield.y;
+          // uvHeightfield += 0.5 / uHeightfieldSize;
+          uvHeightfield.x += 0.5; // offset to center of pixel
+          uvHeightfield.y -= 0.5; // offset to center of pixel
+          uvHeightfield = mod(uvHeightfield / uHeightfieldSize, 1.);
           float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
           pos.y += heightfieldValue;
         } else {
@@ -468,8 +475,8 @@ class SilkGrassMesh extends BatchedMesh {
         }
 
         // height offset
-        // pos = offsetHeight1(pos, p);
-        pos = offsetHeight2(pos, p);
+        pos = offsetHeight1(pos, p);
+        // pos = offsetHeight2(pos, p);
 
         // output
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);

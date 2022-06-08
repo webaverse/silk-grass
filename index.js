@@ -339,6 +339,31 @@ class SilkGrassMesh extends BatchedMesh {
         return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
       }
 
+      vec3 offsetHeight1(vec3 pos, vec3 offset) {
+        vec2 pos2D = offset.xz;
+        const float overflowBuffer = 1.;
+        if (
+          (pos2D.x >= uHeightfieldPosition.x + overflowBuffer &&
+            pos2D.x <= uHeightfieldPosition.x + uHeightfieldSize - overflowBuffer) &&
+          (pos2D.y >= uHeightfieldPosition.y + overflowBuffer &&
+            pos2D.y <= uHeightfieldPosition.y + uHeightfieldSize - overflowBuffer)
+        ) {
+          vec2 posDiff = pos2D - uHeightfieldBase;
+          vec2 uvHeightfield = mod(posDiff, uHeightfieldSize) / uHeightfieldSize;
+          uvHeightfield += 0.5 / uHeightfieldSize; // offset to center of pixel
+          uvHeightfield.y = 1. - uvHeightfield.y;
+          float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
+          pos.y += heightfieldValue;
+        } else {
+          pos = vec3(0.);
+        }
+        return pos;
+      }
+      vec3 offsetHeight2(vec3 pos, vec3 offset) {
+        pos.y += offset.y;
+        return pos;
+      }
+
       const float segmentHeight = ${segmentHeight.toFixed(8)};
       const float heightSegments = ${heightSegments.toFixed(8)};  
       const float topSegmentY = segmentHeight * heightSegments;
@@ -443,31 +468,8 @@ class SilkGrassMesh extends BatchedMesh {
         }
 
         // height offset
-        {
-          vec2 pos2D = p.xz;
-          // pos2D += 0.5;
-
-          const float overflowBuffer = 1.;
-          if (
-            (pos2D.x >= uHeightfieldPosition.x + overflowBuffer &&
-              pos2D.x <= uHeightfieldPosition.x + uHeightfieldSize - overflowBuffer) &&
-            (pos2D.y >= uHeightfieldPosition.y + overflowBuffer &&
-              pos2D.y <= uHeightfieldPosition.y + uHeightfieldSize - overflowBuffer)
-          ) {
-            vec2 posDiff = pos2D - uHeightfieldBase;
-            vec2 uvHeightfield = mod(posDiff, uHeightfieldSize) / uHeightfieldSize;
-            uvHeightfield += 0.5 / uHeightfieldSize; // offset to center of pixel
-            uvHeightfield.y = 1. - uvHeightfield.y;
-            float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
-            pos.y += heightfieldValue;
-            // pos.y += p.y;
-
-            // vColor = (uvHeightfield.x > 0. && uvHeightfield.x < 1.) ? uvHeightfield : vec2(0.);
-            // vColor = vec2(heightfieldValue * 10., 0.);
-          } else {
-            pos = vec3(0.);
-          }
-        }
+        pos = offsetHeight1(pos, p);
+        // pos = offsetHeight2(pos, p);
 
         // output
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -526,13 +528,10 @@ class SilkGrassMesh extends BatchedMesh {
       void main() {
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
         
-        // gl_FragColor.rgb = displacementColor.rgb;
         gl_FragColor.rgb = color *
           (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
           (0.2 + vY/height * 0.8);
         gl_FragColor.a = 1.;
-        // gl_FragColor.rb = vColor;
-        // gl_FragColor.g = 0.;
       }
     `;
     const material = new WebaverseShaderMaterial({

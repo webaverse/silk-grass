@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
-const {useFrame, useApp, useScene, useSound, useMaterials, useMeshes, useGeometryAllocators, useRenderer, useCamera, useProcGen, useDcWorkerManager, useLocalPlayer, useHitManager, useLodder} = metaversefile;
+const {useFrame, useApp, useScene, useSound, useMaterials, useInstancing, useRenderer, useCamera, useProcGen, useDcWorkerManager, useLocalPlayer, useHitManager, useLodder} = metaversefile;
 
 const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
 
@@ -263,11 +263,10 @@ const _getHeightfieldChunk = async (minX, minZ, lod) => {
   );
   return heightfield;
 };
-const {BatchedMesh} = useMeshes();
+const {BatchedMesh, InstancedGeometryAllocator} = useInstancing();
 class SilkGrassMesh extends BatchedMesh {
   constructor() {
     const {WebaverseShaderMaterial} = useMaterials();
-    const {InstancedGeometryAllocator} = useGeometryAllocators();
 
     const displacementMaps = [
       _makeRenderTarget(),

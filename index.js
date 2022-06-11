@@ -28,13 +28,14 @@ const heightSegments = 8;
 const openEnded = false;
 const segmentHeight = height / heightSegments;
 const numBlades = 4 * 1024;
-const maxInstancesPerDrawCall = numBlades;
-const maxDrawCallsPerGeometry = 32;
 const cutTime = 1;
 const growTime = 60;
 const cutGrowTime = cutTime + growTime;
 const cutHeightOffset = -1.4;
 const floorLimit = dropItemSize / 2;
+
+const maxInstancesPerDrawCall = numBlades;
+const maxDrawCallsPerGeometry = 32;
 
 const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
 const heightfieldBase = new THREE.Vector3(-heightfieldSize / 2, 0, -heightfieldSize / 2);

@@ -264,8 +264,8 @@ const _getHeightfieldChunk = async (minX, minZ, lod) => {
   );
   return heightfield;
 };
-const {BatchedMesh, InstancedGeometryAllocator} = useInstancing();
-class SilkGrassMesh extends BatchedMesh {
+const {InstancedBatchedMesh, InstancedGeometryAllocator} = useInstancing();
+class SilkGrassMesh extends InstancedBatchedMesh {
   constructor() {
     const {WebaverseShaderMaterial} = useMaterials();
 

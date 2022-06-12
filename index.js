@@ -6,12 +6,13 @@ const {useFrame, useApp, useScene, useSound, useMaterials, useInstancing, useRen
 const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
 
 const localVector = new THREE.Vector3();
-// const localVector2 = new THREE.Vector3();
+const localVector2 = new THREE.Vector3();
 // const localQuaternion = new THREE.Quaternion();
 const localEuler = new THREE.Euler();
 const localVector2D = new THREE.Vector2();
 // const localVector2D2 = new THREE.Vector2();
 // const localVector2D3 = new THREE.Vector2();
+const localBox = new THREE.Box3();
 
 const zeroVector = new THREE.Vector3(0, 0, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
@@ -289,6 +290,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     ], {
       maxInstancesPerDrawCall,
       maxDrawCallsPerGeometry,
+      boundingType: 'box',
     });
     const {geometry, textures: attributeTextures} = allocator;
     for (const k in attributeTextures) {
@@ -1088,7 +1090,15 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             drawCall.setInstanceCount(ps.length / 3);
           };
     
-          const drawCall = this.allocator.allocDrawCall(0);
+          localBox.setFromCenterAndSize(
+            localVector.set(
+              (chunk.x + 0.5) * chunkWorldSize,
+              (chunk.y + 0.5) * chunkWorldSize,
+              (chunk.z + 0.5) * chunkWorldSize
+            ),
+            localVector2.set(chunkWorldSize, chunkWorldSize * 10, chunkWorldSize)
+          );
+          const drawCall = this.allocator.allocDrawCall(0, localBox);
           _renderSilksGeometry(drawCall, result.ps, result.qs);
     
           signal.addEventListener('abort', e => {

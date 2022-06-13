@@ -19,7 +19,8 @@ const gravity = new THREE.Vector3(0, -9.8, 0);
 const dropItemSize = 0.2;
 const chunkWorldSize = 16;
 const heightfieldRange = 2;
-const heightfieldSize = chunkWorldSize * heightfieldRange * 2;
+const heightfieldSizeInChunks = heightfieldRange * 2;
+const heightfieldSize = chunkWorldSize * heightfieldSizeInChunks;
 const numLods = 1;
 const maxAnisotropy = 16;
 
@@ -90,7 +91,14 @@ const _averagePoints = (points, target) => {
   }
   return target.divideScalar(points.length);
 };
-
+const _wrapUvs = (geometry, offset, size) => {
+  for (let i = 0; i < geometry.attributes.uv.count; i++) {
+    localVector2D.fromArray(geometry.attributes.uv.array, i * 2)
+      .multiply(size)
+      .add(offset)
+      .toArray(geometry.attributes.uv.array, i * 2);
+  }
+};
 function mod(a, n) {
   return (a % n + n) % n;
 }
@@ -98,12 +106,50 @@ function mod(a, n) {
 //
 
 const fullScreenQuadGeometry = new THREE.PlaneBufferGeometry(2, 2);
+const fullScreen2xQuadGeometry = (() => {
+  // return new THREE.PlaneBufferGeometry(2, 2);
+  
+  const halfChunkSize = 1 / heightfieldSizeInChunks / 2;
+  
+  const geometries = [];
+  for (let dz = 0; dz < heightfieldSizeInChunks; dz++) {
+    for (let dx = 0; dx < heightfieldSizeInChunks; dx++) {
+      const uvOffsetX = dx / heightfieldSizeInChunks;
+      const uvOffsetZ = dz / heightfieldSizeInChunks;
+      const uvOffset = new THREE.Vector2(uvOffsetX, uvOffsetZ);
+
+      const uvSize = new THREE.Vector2().setScalar(1 / heightfieldSizeInChunks);
+
+      for (let dz2 = 0; dz2 < 2; dz2++) {
+        for (let dx2 = 0; dx2 < 2; dx2++) {
+          const geometryOffsetX = (dx * 2 + dx2) * halfChunkSize;
+          const geometryOffsetZ = (dz * 2 + dz2) * halfChunkSize;
+
+          const baseGeometry = new THREE.PlaneBufferGeometry(1, 1)
+            .scale(halfChunkSize, halfChunkSize, halfChunkSize)
+            .translate(halfChunkSize / 2, halfChunkSize / 2, 0);
+          const geometry = baseGeometry.clone()
+            .translate(geometryOffsetX, geometryOffsetZ, 0)
+            // .scale(0.9, 0.9, 0.9)
+          _wrapUvs(geometry, uvOffset, uvSize);
+          geometries.push(geometry);
+        }
+      }
+    }
+  }
+
+  const geometry = BufferGeometryUtils.mergeBufferGeometries(geometries)
+    .translate(-0.5, -0.5, 0)
+    .scale(2, 2, 2);
+  // window.geometry = geometry;
+  return geometry;
+})();
 const fullscreenVertexShader = `\
   varying vec2 vUv;
 
   void main() {
     vUv = uv;
-    gl_Position = vec4(position.xy, 1.0, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
@@ -241,7 +287,7 @@ const _makeRenderTarget = () => new THREE.WebGLRenderTarget(512, 512, {
   wrapT: THREE.ClampToEdgeWrapping,
   stencilBuffer: false,
 });
-const _makeHeightfieldRenderTarget = () => new THREE.WebGLRenderTarget(heightfieldSize, heightfieldSize, {
+const _makeHeightfieldRenderTarget = (w, h) => new THREE.WebGLRenderTarget(w, h, {
   minFilter: THREE.LinearFilter,
   magFilter: THREE.LinearFilter,
   // minFilter: THREE.NearestFilter,
@@ -300,9 +346,42 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
     // main material
 
-    const heightfieldRenderTarget = _makeHeightfieldRenderTarget();
+    const heightfieldRenderTarget = _makeHeightfieldRenderTarget(heightfieldSize, heightfieldSize);
+    const heightfieldFourTapRenderTarget = _makeHeightfieldRenderTarget(heightfieldSize * 2, heightfieldSize * 2);
     // heightfieldRenderTarget.texture.flipY = false;
     // window.heightfieldRenderTarget = heightfieldRenderTarget;
+
+    // XXX debug
+    {
+      const fragmentShader = `\
+        uniform sampler2D uHeightfield;
+        varying vec2 vUv;
+    
+        void main() {
+          gl_FragColor = texture2D(uHeightfield, vUv);
+          /* gl_FragColor.rb = vUv * 0.5;
+          gl_FragColor.g = 0.;
+          gl_FragColor.a = 1.; */
+        }
+      `;
+      const {WebaverseShaderMaterial} = useMaterials();
+      const material = new WebaverseShaderMaterial({
+        uniforms: {
+          uHeightfield: {
+            value: heightfieldRenderTarget.texture,
+            needsUpdate: true,
+          }
+        },
+        vertexShader: fullscreenVertexShader,
+        fragmentShader,
+      });
+      const mesh = new THREE.Mesh(fullScreen2xQuadGeometry, material);
+      mesh.position.set(0, 1.5, -1.5);
+      mesh.frustumCulled = false;
+      const scene = useScene();
+      scene.add(mesh);
+      mesh.updateMatrixWorld();
+    }
 
     const grassVertexShader = `\
       precision highp float;
@@ -316,7 +395,9 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       uniform sampler2D qTexture;
       uniform float uWindRotation;
       uniform sampler2D uHeightfield;
+      uniform sampler2D uHeightfieldFourTap;
       uniform vec2 uHeightfieldBase;
+      uniform vec2 uHeightfieldMinPosition;
       uniform vec2 uHeightfieldPosition;
       uniform float uChunkSize;
       uniform float uHeightfieldSize;
@@ -327,6 +408,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
+      varying vec2 vF;
       varying vec3 vNoise;
       // varying vec2 vColor;
 
@@ -344,8 +426,66 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
       }
 
+      vec4 fourTapSample(
+        sampler2D atlas,
+        vec2 tileUV,
+        vec2 tileOffset,
+        vec2 tileSize
+      ) {
+        //Initialize accumulators
+        vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
+        float totalWeight = 0.0;
+
+        // tileUv.x += 0.5 / uHeightfieldSize;
+        // tileUv.y -= 0.5 / uHeightfieldSize;
+
+        // centerUv = mod(centerUv, 0.5) * 0.5;
+
+        // tileUV.y = 1. - tileUV.y;
+        // tileOffset.y = 1. - tileOffset.y;
+
+        for (int dx=0; dx<2; ++dx) {
+          for (int dy=0; dy<2; ++dy) {
+            vec2 tileCoord = 2.0 * fract(0.5 * (tileUV + vec2(dx,dy)));
+            /* tileUV.y = 1. - tileUV.y;
+            vec2 tileCoord2 = 2.0 * fract(0.5 * (tileUV + vec2(dx,dy)));
+            tileUV.y = 1. - tileUV.y; */
+      
+            //Weight sample based on distance to center
+            float w = pow(min(abs(tileCoord.x-1.0), abs(tileCoord.y-1.0)), 16.);
+      
+            //Compute atlas coord
+            vec2 atlasUV = tileOffset + tileSize * tileCoord;
+      
+            //Sample and accumulate
+            // atlasUV += vec2(0.5, 0.5) / (uHeightfieldSize * 2.0);
+            // atlasUV.y = 1. - atlasUV.y;
+            // atlasUV += vec2(0.5, 0.5) / (uHeightfieldSize * 2.0);
+            color += w * texture2D(atlas, atlasUV);
+            totalWeight += w;
+          }
+        }
+
+        vF = tileUV.xy;
+        if (vF.x >= 0.5) {
+          vF.x = 1.;
+        } else {
+          vF.x = 0.;
+        }
+        if (vF.y >= 0.5) {
+          vF.y = 1.;
+        } else {
+          vF.y = 0.;
+        }
+      
+        return color / totalWeight;
+        // return vec4(60.);
+      }
+
       vec3 offsetHeight1(vec3 pos, vec3 offset) {
         vec2 pos2D = offset.xz;
+        // pos2D.x += 0.5;
+        // pos2D.y += 0.5;
         const float overflowBuffer = 1.;
         // pos2D += 0.5;
         if (
@@ -356,12 +496,23 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         ) {
           vec2 posDiff = pos2D - uHeightfieldBase;
           vec2 uvHeightfield = posDiff;
-          uvHeightfield.y = uHeightfieldSize - uvHeightfield.y;
-          // uvHeightfield += 0.5 / uHeightfieldSize;
-          uvHeightfield.x += 0.5; // offset to center of pixel
-          uvHeightfield.y -= 0.5; // offset to center of pixel
-          uvHeightfield = mod(uvHeightfield / uHeightfieldSize, 1.);
+          uvHeightfield /= uHeightfieldSize;
+          uvHeightfield = mod(uvHeightfield, 1.);
+          uvHeightfield.x += 0.5 / uHeightfieldSize;
+          uvHeightfield.y += 0.5 / uHeightfieldSize;
+          uvHeightfield.y = 1. - uvHeightfield.y;
           float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
+
+          vec2 posDiffMod = uvHeightfield;
+          vec2 tileUv = mod(posDiffMod * 4., 1.);
+          vec2 tileOffset = floor(posDiffMod * 4.) / 4.;
+          vec2 tileSize = vec2(1. / (uHeightfieldSize / uChunkSize * 2.));
+          
+          // tileUv += vec2(0.5) / uHeightfieldSize;
+
+          // float heightfieldValue = fourTapSample(uHeightfieldFourTap, tileUv, tileOffset, tileSize).r;
+          // float heightfieldValue = tileOffset.x * 30. + 60.;
+
           pos.y += heightfieldValue;
         } else {
           pos = vec3(0.);
@@ -501,6 +652,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
+      varying vec2 vF;
       varying vec3 vNoise;
       // varying vec2 vColor;
 
@@ -537,9 +689,10 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       void main() {
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
         
-        gl_FragColor.rgb = color *
+        /* gl_FragColor.rgb = color *
           (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
-          (0.2 + vY/height * 0.8);
+          (0.2 + vY/height * 0.8); */
+        gl_FragColor.rgb = vec3(vF.x, 0., vF.y);
         gl_FragColor.a = 1.;
       }
     `;
@@ -577,11 +730,19 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           value: heightfieldRenderTarget.texture,
           needsUpdate: true,
         },
+        uHeightfieldFourTap: {
+          value: heightfieldFourTapRenderTarget.texture,
+          needsUpdate: true,
+        },
         uHeightfieldBase: {
           value: heightfieldBase2D,
           needsUpdate: true,
         },
         uHeightfieldPosition: {
+          value: new THREE.Vector2(),
+          needsUpdate: true,
+        },
+        uHeightfieldMinPosition: {
           value: new THREE.Vector2(),
           needsUpdate: true,
         },
@@ -613,13 +774,56 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
     // update functions
 
-    this.updateCoord = coord => {
+    this.updateCoord = (coord, min2xCoord) => {
       material.uniforms.uHeightfieldPosition.value.set(coord.x, coord.z)
         .multiplyScalar(chunkWorldSize)
         .add(localVector2D.set(-heightfieldSize / 2, -heightfieldSize / 2));
       material.uniforms.uHeightfieldPosition.needsUpdate = true;
+      material.uniforms.uHeightfieldMinPosition.value.set(min2xCoord.x, min2xCoord.z)
+        .multiplyScalar(chunkWorldSize);
+      material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
       // console.log('update heightfield position', material.uniforms.uHeightfieldPosition.value.toArray().join(','));
     };
+    const heightfieldFourTapScene = (() => {
+      const fourTapVertexShader = `\
+        varying vec2 vUv;
+
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 1.0, 1.0);
+        }
+      `;
+      const fullscreenFragmentShader = `\
+        uniform sampler2D uHeightfield;
+        varying vec2 vUv;
+
+        void main() {
+          gl_FragColor = texture2D(uHeightfield, vUv);
+          // gl_FragColor.rb = vUv;
+          // gl_FragColor.g = 0.;
+          // gl_FragColor.a = 1.;
+        }
+      `;
+      const fourTapFullscreenMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          uHeightfield: {
+            value: heightfieldRenderTarget.texture,
+            needsUpdate: true,
+          },
+        },
+        vertexShader: fourTapVertexShader,
+        fragmentShader: fullscreenFragmentShader,
+        // side: THREE.DoubleSide,
+      });
+      const fourTapQuadMesh = new THREE.Mesh(fullScreen2xQuadGeometry, fourTapFullscreenMaterial);
+      fourTapQuadMesh.frustumCulled = false;
+      const scene = new THREE.Scene();
+      scene.add(fourTapQuadMesh);
+      /* scene.update = () => {
+        // const localPlayer = useLocalPlayer();
+      }; */
+      return scene;
+    })();
     const animationScene = (() => {
       const fullscreenFragmentShader = `\
         uniform vec3 uPlayerPosition;
@@ -1038,7 +1242,31 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
       }
     };
+    this.updateFourTapHeightfield = () => {
+      const renderer = useRenderer();
+      const context = renderer.getContext();
+      const camera = useCamera();
+
+      {
+        // update
+        // heightfieldFourTapScene.update();
+        
+        // push state
+        const oldRenderTarget = renderer.getRenderTarget();
+        context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
+
+        // render
+        renderer.setRenderTarget(heightfieldFourTapRenderTarget);
+        // renderer.clear();
+        renderer.render(heightfieldFourTapScene, camera);
+
+        // pop state
+        renderer.setRenderTarget(oldRenderTarget);
+        context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
+      }
+    };
     this.heightfieldRenderTarget = heightfieldRenderTarget;
+    this.heightfieldFourTapRenderTarget = heightfieldFourTapRenderTarget;
 
     /* // XXX debugging
     const heightfieldMesh = (() => {
@@ -1128,6 +1356,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           // console.log('render update', position.x, position.y);
 
           this.renderHeightfieldUpdate(position, heightfield);
+          this.updateFourTapHeightfield();
           
           /* if (position.x < 0 || position.y < 0) {
             debugger;
@@ -1138,6 +1367,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           signal.addEventListener('abort', e => {
             const position = _getWorldModPosition(localVector);
             this.clearHeightfieldChunk(position);
+            this.updateFourTapHeightfield();
             /* const renderer = useRenderer();
             const heightfieldMin = this.material.uniforms.uHeightfieldPosition.value;
             const chunkPosition = localVector2D2.set(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize);
@@ -1277,8 +1507,8 @@ export default e => {
   chunksMesh.updateMatrixWorld();
 
   tracker.addEventListener('coordupdate', e => {
-    const {coord} = e.data;
-    chunksMesh.updateCoord(coord);
+    const {coord, min2xCoord} = e.data;
+    chunksMesh.updateCoord(coord, min2xCoord);
   });
 
   useFrame(() => {

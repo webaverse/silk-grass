@@ -149,7 +149,7 @@ const fullscreenVertexShader = `\
 
   void main() {
     vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position = vec4(position.xy, 0., 1.0);
   }
 `;
 
@@ -351,17 +351,14 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     // heightfieldRenderTarget.texture.flipY = false;
     // window.heightfieldRenderTarget = heightfieldRenderTarget;
 
-    // XXX debug
-    {
+    // XXX debug mehh
+    /* {
       const fragmentShader = `\
         uniform sampler2D uHeightfield;
         varying vec2 vUv;
     
         void main() {
           gl_FragColor = texture2D(uHeightfield, vUv);
-          /* gl_FragColor.rb = vUv * 0.5;
-          gl_FragColor.g = 0.;
-          gl_FragColor.a = 1.; */
         }
       `;
       const {WebaverseShaderMaterial} = useMaterials();
@@ -381,7 +378,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       const scene = useScene();
       scene.add(mesh);
       mesh.updateMatrixWorld();
-    }
+    } */
 
     const grassVertexShader = `\
       precision highp float;
@@ -482,44 +479,30 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         // return vec4(60.);
       }
 
-      vec3 offsetHeight1(vec3 pos, vec3 offset) {
+      float offsetHeight(vec3 offset) {
         vec2 pos2D = offset.xz;
-        // pos2D.x += 0.5;
-        // pos2D.y += 0.5;
-        // const float overflowBuffer = 1.5;
-        // pos2D += 0.5;
-        /* if (
-          (pos2D.x >= uHeightfieldMinPosition.x + overflowBuffer &&
-            pos2D.x <= uHeightfieldMinPosition.x + uHeightfieldSize - overflowBuffer) &&
-          (pos2D.y >= uHeightfieldMinPosition.y + overflowBuffer &&
-            pos2D.y <= uHeightfieldMinPosition.y + uHeightfieldSize - overflowBuffer)
-        ) { */
-          vec2 posDiff = pos2D - uHeightfieldMinPosition;
-          vec2 uvHeightfield = posDiff;
-          uvHeightfield /= uHeightfieldSize;
-          // uvHeightfield = mod(uvHeightfield, 1.);
-          uvHeightfield.x += 0.5 / uHeightfieldSize;
-          uvHeightfield.y += 0.5 / uHeightfieldSize;
-          uvHeightfield.y = 1. - uvHeightfield.y;
-          float heightfieldValue = texture2D(uHeightfieldFourTap, uvHeightfield).r;
 
-          vec2 posDiffMod = uvHeightfield;
-          vec2 tileUv = mod(posDiffMod * 4., 1.);
-          vec2 tileOffset = floor(mod(posDiffMod, 1.) * 4.) / 4.;
-          vec2 tileSize = vec2(1. / (uHeightfieldSize / uChunkSize * 2.));
-          
-          // float heightfieldValue = fourTapSample(uHeightfieldFourTap, tileUv, tileOffset, tileSize).r;
-          // float heightfieldValue = tileOffset.x * 30. + 60.;
+        vec2 posDiff = pos2D - uHeightfieldMinPosition;
+        vec2 uvHeightfield = posDiff;
+        uvHeightfield /= uHeightfieldSize;
+        
+        vUv2 = uvHeightfield;
+        vUv2.y = 1. - vUv2.y;
 
-          pos.y += heightfieldValue;
-        /* } else {
-          pos = vec3(0.);
-        } */
-        return pos;
-      }
-      vec3 offsetHeight2(vec3 pos, vec3 offset) {
-        pos.y += offset.y;
-        return pos;
+        uvHeightfield.x += 0.5 / uHeightfieldSize;
+        uvHeightfield.y += 0.5 / uHeightfieldSize;
+        uvHeightfield.y = 1. - uvHeightfield.y;
+        float heightfieldValue = texture2D(uHeightfieldFourTap, uvHeightfield).r;
+
+        vec2 posDiffMod = uvHeightfield;
+        vec2 tileUv = mod(posDiffMod * 4., 1.);
+        vec2 tileOffset = floor(mod(posDiffMod, 1.) * 4.) / 4.;
+        vec2 tileSize = vec2(1. / (uHeightfieldSize / uChunkSize * 2.));
+        
+        // float heightfieldValue = fourTapSample(uHeightfieldFourTap, tileUv, tileOffset, tileSize).r;
+        // float heightfieldValue = tileOffset.x * 30. + 60.;
+
+        return heightfieldValue;
       }
 
       const float segmentHeight = ${segmentHeight.toFixed(8)};
@@ -540,8 +523,9 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         vec3 p = texture2D(pTexture, pUv).xyz;
         vec4 q = texture2D(qTexture, pUv).xyzw;
 
+        float h = offsetHeight(p);
+
         vUv = uv;
-        vUv2 = p.xz / ${chunkWorldSize.toFixed(8)};
 
         // time diff
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
@@ -626,8 +610,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         }
 
         // height offset
-        pos = offsetHeight1(pos, p);
-        // pos = offsetHeight2(pos, p);
+        pos.y += h;
 
         // output
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -690,6 +673,10 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         gl_FragColor.rgb = color *
           (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
           (0.2 + vY/height * 0.8);
+
+        gl_FragColor.rgb = vec3(0.);
+        // gl_FragColor.rb = vUv2;
+        gl_FragColor.rgb = displacementColor.rgb;
         // gl_FragColor.rgb = vec3(vF.x, 0., vF.y);
         gl_FragColor.a = 1.;
       }
@@ -780,11 +767,14 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       material.uniforms.uHeightfieldMinPosition.value.set(min2xCoord.x, min2xCoord.z)
         .multiplyScalar(chunkWorldSize);
       material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
-      // console.log('update heightfield position', material.uniforms.uHeightfieldPosition.value.toArray().join(','));
       
       heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.value
         .copy(material.uniforms.uHeightfieldMinPosition.value);
       heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
+    
+      displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.value
+        .copy(material.uniforms.uHeightfieldMinPosition.value);
+      displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
     };
     const heightfieldFourTapScene = (() => {
       const fourTapVertexShader = `\
@@ -847,19 +837,40 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       }; */
       return scene;
     })();
-    const animationScene = (() => {
+    const displacementAnimationScene = (() => {
+      const heightfieldPlaneGeometry = new THREE.PlaneBufferGeometry(1, 1)
+        .rotateX(-Math.PI / 2)
+        .translate(0.5, 0, 0.5)
+        .scale(heightfieldSize, 1, heightfieldSize);
+      const displacementVertexShader = `\
+        uniform vec2 uHeightfieldMinPosition;
+        uniform float uHeightfieldSize;
+        varying vec2 vUv;
+        varying vec3 vPosition;
+
+        void main() {
+          vUv = uv;
+          vec4 position2 = modelMatrix * vec4(position, 1.0);
+          vPosition = position2.xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+
+        }
+      `;
       const fullscreenFragmentShader = `\
         uniform vec3 uPlayerPosition;
-        uniform vec3 uWorldPosition;
+        // uniform vec3 uWorldPosition;
         uniform sampler2D uNoiseTexture;
         uniform sampler2D uDisplacementMap;
+        uniform vec2 uHeightfieldMinPosition;
+        uniform float uHeightfieldSize;
+        uniform sampler2D uHeightfieldFourTap;
         uniform vec3 pA1;
         uniform vec3 pA2;
         uniform vec3 pB1;
         uniform vec3 pB2;
         varying vec2 vUv;
-
-        const float chunkWorldSize = ${chunkWorldSize.toFixed(8)};
+        varying vec3 vPosition;
+        // const float chunkWorldSize = ${chunkWorldSize.toFixed(8)};
         const float learningRate = 0.005;
         const float maxDistance = 0.6;
 
@@ -881,21 +892,39 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         }
 
         void main() {
-          vec2 virtualXZ = vec2(vUv.x, vUv.y) * chunkWorldSize;
-          virtualXZ += uWorldPosition.xz;
-          float distanceToPlayer = distanceToLine(
-            vec3(virtualXZ.x, 0., virtualXZ.y),
+          vec2 pos2D = vPosition.xz;
+          
+          vec2 posDiff = pos2D - uHeightfieldMinPosition;
+          vec2 uvHeightfield = posDiff;
+          uvHeightfield /= uHeightfieldSize;
+          
+          uvHeightfield.x += 0.5 / uHeightfieldSize;
+          uvHeightfield.y += 0.5 / uHeightfieldSize;
+          uvHeightfield.y = 1. - uvHeightfield.y;
+          float heightfieldValue = texture2D(uHeightfieldFourTap, uvHeightfield).r;
+
+          //
+
+          vec3 virtual = vPosition;
+          virtual.y += heightfieldValue;
+
+          // virtual.y = 0.;
+          // vec3 uPlayerPosition2 = uPlayerPosition;
+          // uPlayerPosition2.y = 0.;
+          
+          float distanceToPlayerVertical = distanceToLine(
+            virtual,
             uPlayerPosition,
-            uPlayerPosition + vec3(0., -1.5, 0.)
+            uPlayerPosition + vec3(0., -1.5, 0.) // XXX should use the real avatar height
+            // uPlayerPosition2
           );
 
-          // float distanceToPlayer = length(virtualXZ - uPlayerPosition.xz);
-          vec2 direction = distanceToPlayer > 0.0 ? normalize(virtualXZ - uPlayerPosition.xz) : vec2(0.0, 0.0);
+          vec2 direction = distanceToPlayerVertical > 0.0 ? normalize(virtual.xz - uPlayerPosition.xz) : vec2(0.0, 0.0);
 
           vec4 oldColor = texture2D(uDisplacementMap, vUv);
 
           vec4 newColor = vec4(direction, oldColor.zw);
-          float distanceFactor = min(max(maxDistance - distanceToPlayer, 0.), 1.);
+          float distanceFactor = min(max(maxDistance - distanceToPlayerVertical, 0.), 1.);
           
           float localLearningRate = learningRate;
           if (distanceFactor > 0.0) {
@@ -909,15 +938,13 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             newColor.z,
             newColor.w
           );
+          // gl_FragColor = vec4(vUv.x, 0., vUv.y, 1.);
+          // gl_FragColor = vec4(heightfieldValue, 0., 0., 1.);
         }
       `;
       const fullscreenMaterial = new THREE.ShaderMaterial({
         uniforms: {
           uPlayerPosition: {
-            value: new THREE.Vector3(0, 0, 0),
-            needsUpdate: false,
-          },
-          uWorldPosition: {
             value: new THREE.Vector3(0, 0, 0),
             needsUpdate: false,
           },
@@ -929,25 +956,51 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             value: getNoiseTexture(),
             needsUpdate: true,
           },
+          uHeightfieldSize: {
+            value: heightfieldSize,
+            needsUpdate: true,
+          },
+          uHeightfieldMinPosition: {
+            value: new THREE.Vector2(),
+            needsUpdate: true,
+          },
+          uHeightfieldFourTap: {
+            value: heightfieldFourTapRenderTarget.texture,
+            needsUpdate: true,
+          },
         },
-        vertexShader: fullscreenVertexShader,
+        vertexShader: displacementVertexShader,
         fragmentShader: fullscreenFragmentShader,
         // side: THREE.DoubleSide,
       });
-      const fullscreenQuadMesh = new THREE.Mesh(fullScreenQuadGeometry, fullscreenMaterial);
-      fullscreenQuadMesh.frustumCulled = false;
+      const displacementAnimationMesh = new THREE.Mesh(heightfieldPlaneGeometry, fullscreenMaterial);
+      displacementAnimationMesh.frustumCulled = false;
       const scene = new THREE.Scene();
-      scene.add(fullscreenQuadMesh);
+      scene.add(displacementAnimationMesh);
+      scene.mesh = displacementAnimationMesh;
+
+      scene.camera = new THREE.OrthographicCamera(0, heightfieldSize, 0, -heightfieldSize, -1000, 1000);
+      scene.camera.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+      scene.camera.updateMatrixWorld();
+      
       scene.update = () => {
         const localPlayer = useLocalPlayer();
         fullscreenMaterial.uniforms.uPlayerPosition.value.copy(localPlayer.position);
         fullscreenMaterial.uniforms.uPlayerPosition.needsUpdate = true;
 
-        fullscreenMaterial.uniforms.uWorldPosition.value.setFromMatrixPosition(this.matrixWorld);
-        fullscreenMaterial.uniforms.uWorldPosition.needsUpdate = true;
-
         fullscreenMaterial.uniforms.uDisplacementMap.value = displacementMaps[0].texture;
         fullscreenMaterial.uniforms.uDisplacementMap.needsUpdate = true;
+
+        // uHeightfieldMinPosition is updated when the coord changes
+        displacementAnimationMesh.position.setFromMatrixPosition(this.matrixWorld)
+          .add(localVector.set(
+            fullscreenMaterial.uniforms.uHeightfieldMinPosition.value.x,
+            0,
+            fullscreenMaterial.uniforms.uHeightfieldMinPosition.value.y
+          ));
+        displacementAnimationMesh.updateMatrixWorld();
+        scene.camera.position.copy(displacementAnimationMesh.position);
+        scene.camera.updateMatrixWorld();
       };
       return scene;
     })();
@@ -1161,9 +1214,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         // console.log('render heightfield', heightfieldLocalWritePosition.x, heightfieldLocalWritePosition.y, heightfield);
       };
       scene3.camera = new THREE.OrthographicCamera(0, heightfieldSize, 0, -heightfieldSize, -1000, 1000);
-      // scene3.camera.position.y = 1;
       scene3.camera.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-      // scene3.add(scene3.camera);
       scene3.camera.updateMatrixWorld();
       return scene3;
     })();
@@ -1174,7 +1225,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
       {
         // update
-        animationScene.update();
+        displacementAnimationScene.update();
 
         // push state
         const oldRenderTarget = renderer.getRenderTarget();
@@ -1183,7 +1234,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         // render
         renderer.setRenderTarget(displacementMaps[1]);
         renderer.clear();
-        renderer.render(animationScene, camera);
+        renderer.render(displacementAnimationScene, displacementAnimationScene.camera);
 
         // pop state
         renderer.setRenderTarget(oldRenderTarget);
@@ -1206,7 +1257,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         // render
         renderer.setRenderTarget(displacementMaps[1]);
         renderer.clear();
-        renderer.render(cutScene, camera);
+        renderer.render(cutScene, cutScene.camera);
 
         // pop state
         renderer.setRenderTarget(oldRenderTarget);

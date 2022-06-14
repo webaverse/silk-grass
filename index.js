@@ -777,14 +777,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
     };
     const heightfieldFourTapScene = (() => {
-      const fourTapVertexShader = `\
-        varying vec2 vUv;
-
-        void main() {
-          vUv = uv;
-          gl_Position = vec4(position.xy, 1.0, 1.0);
-        }
-      `;
       const fullscreenFragmentShader = `\
         uniform sampler2D uHeightfield;
         uniform vec2 uHeightfieldBase;
@@ -796,11 +788,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           vec2 pos2D = vUv;
           vec2 posDiff = pos2D - (uHeightfieldBase + uHeightfieldMinPosition) / uHeightfieldSize;
           vec2 uvHeightfield = posDiff;
-          // uvHeightfield /= uHeightfieldSize;
           uvHeightfield = mod(uvHeightfield, 1.);
-          // uvHeightfield.x += 0.5 / uHeightfieldSize;
-          // uvHeightfield.y += 0.5 / uHeightfieldSize;
-          // uvHeightfield.y = 1. - uvHeightfield.y;
           gl_FragColor = texture2D(uHeightfield, uvHeightfield);
         }
       `;
@@ -823,18 +811,14 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             needsUpdate: true,
           }
         },
-        vertexShader: fourTapVertexShader,
+        vertexShader: fullscreenVertexShader,
         fragmentShader: fullscreenFragmentShader,
-        // side: THREE.DoubleSide,
       });
       const fourTapQuadMesh = new THREE.Mesh(fullScreenQuadGeometry, fourTapFullscreenMaterial);
       fourTapQuadMesh.frustumCulled = false;
       const scene = new THREE.Scene();
       scene.add(fourTapQuadMesh);
       scene.mesh = fourTapQuadMesh;
-      /* scene.update = () => {
-        // const localPlayer = useLocalPlayer();
-      }; */
       return scene;
     })();
     const displacementAnimationScene = (() => {

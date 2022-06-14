@@ -347,7 +347,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     // main material
 
     const heightfieldRenderTarget = _makeHeightfieldRenderTarget(heightfieldSize, heightfieldSize);
-    const heightfieldFourTapRenderTarget = _makeHeightfieldRenderTarget(heightfieldSize * 2, heightfieldSize * 2);
+    const heightfieldFourTapRenderTarget = _makeHeightfieldRenderTarget(heightfieldSize, heightfieldSize);
     // heightfieldRenderTarget.texture.flipY = false;
     // window.heightfieldRenderTarget = heightfieldRenderTarget;
 
@@ -488,20 +488,20 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         // pos2D.y += 0.5;
         const float overflowBuffer = 1.5;
         // pos2D += 0.5;
-        if (
+        /* if (
           (pos2D.x >= uHeightfieldMinPosition.x + overflowBuffer &&
             pos2D.x <= uHeightfieldMinPosition.x + uHeightfieldSize - overflowBuffer) &&
           (pos2D.y >= uHeightfieldMinPosition.y + overflowBuffer &&
             pos2D.y <= uHeightfieldMinPosition.y + uHeightfieldSize - overflowBuffer)
-        ) {
-          vec2 posDiff = pos2D - uHeightfieldBase;
+        ) { */
+          vec2 posDiff = pos2D - uHeightfieldMinPosition;
           vec2 uvHeightfield = posDiff;
           uvHeightfield /= uHeightfieldSize;
-          uvHeightfield = mod(uvHeightfield, 1.);
+          // uvHeightfield = mod(uvHeightfield, 1.);
           uvHeightfield.x += 0.5 / uHeightfieldSize;
           uvHeightfield.y += 0.5 / uHeightfieldSize;
           uvHeightfield.y = 1. - uvHeightfield.y;
-          float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
+          float heightfieldValue = texture2D(uHeightfieldFourTap, uvHeightfield).r;
 
           vec2 posDiffMod = uvHeightfield;
           vec2 tileUv = mod(posDiffMod * 4., 1.);
@@ -512,9 +512,9 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           // float heightfieldValue = tileOffset.x * 30. + 60.;
 
           pos.y += heightfieldValue;
-        } else {
+        /* } else {
           pos = vec3(0.);
-        }
+        } */
         return pos;
       }
       vec3 offsetHeight2(vec3 pos, vec3 offset) {
@@ -781,6 +781,10 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         .multiplyScalar(chunkWorldSize);
       material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
       // console.log('update heightfield position', material.uniforms.uHeightfieldPosition.value.toArray().join(','));
+      
+      heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.value
+        .copy(material.uniforms.uHeightfieldMinPosition.value);
+      heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
     };
     const heightfieldFourTapScene = (() => {
       const fourTapVertexShader = `\
@@ -793,13 +797,21 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       `;
       const fullscreenFragmentShader = `\
         uniform sampler2D uHeightfield;
+        uniform vec2 uHeightfieldBase;
+        uniform vec2 uHeightfieldMinPosition;
+        uniform float uHeightfieldSize;
         varying vec2 vUv;
 
         void main() {
-          gl_FragColor = texture2D(uHeightfield, vUv);
-          // gl_FragColor.rb = vUv;
-          // gl_FragColor.g = 0.;
-          // gl_FragColor.a = 1.;
+          vec2 pos2D = vUv;
+          vec2 posDiff = pos2D - (uHeightfieldBase + uHeightfieldMinPosition) / uHeightfieldSize;
+          vec2 uvHeightfield = posDiff;
+          // uvHeightfield /= uHeightfieldSize;
+          uvHeightfield = mod(uvHeightfield, 1.);
+          // uvHeightfield.x += 0.5 / uHeightfieldSize;
+          // uvHeightfield.y += 0.5 / uHeightfieldSize;
+          // uvHeightfield.y = 1. - uvHeightfield.y;
+          gl_FragColor = texture2D(uHeightfield, uvHeightfield);
         }
       `;
       const fourTapFullscreenMaterial = new THREE.ShaderMaterial({
@@ -808,15 +820,28 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             value: heightfieldRenderTarget.texture,
             needsUpdate: true,
           },
+          uHeightfieldSize: {
+            value: heightfieldSize,
+            needsUpdate: true,
+          },
+          uHeightfieldBase: {
+            value: heightfieldBase2D,
+            needsUpdate: true,
+          },
+          uHeightfieldMinPosition: {
+            value: new THREE.Vector2(),
+            needsUpdate: true,
+          }
         },
         vertexShader: fourTapVertexShader,
         fragmentShader: fullscreenFragmentShader,
         // side: THREE.DoubleSide,
       });
-      const fourTapQuadMesh = new THREE.Mesh(fullScreen2xQuadGeometry, fourTapFullscreenMaterial);
+      const fourTapQuadMesh = new THREE.Mesh(fullScreenQuadGeometry, fourTapFullscreenMaterial);
       fourTapQuadMesh.frustumCulled = false;
       const scene = new THREE.Scene();
       scene.add(fourTapQuadMesh);
+      scene.mesh = fourTapQuadMesh;
       /* scene.update = () => {
         // const localPlayer = useLocalPlayer();
       }; */

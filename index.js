@@ -452,7 +452,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             // tileUV -= 0.5;
       
             //Weight sample based on distance to center
-            float w = pow(length(tileCoord-1.), 16.);
+            float w = pow(min(abs(1.-tileCoord.x), abs(1.-tileCoord.y)) * 2., 100.);
       
             //Compute atlas coord
             vec2 atlasUV = tileOffset + tileSize * tileCoord;
@@ -460,7 +460,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             //Sample and accumulate
             // atlasUV += vec2(0.5, 0.5) / (uHeightfieldSize * 2.0);
             atlasUV.y = 1. - atlasUV.y;
-            // atlasUV += vec2(0.5, 0.5) / (uHeightfieldSize * 2.0);
+            // atlasUV += vec2(0.5, -0.5) / (uHeightfieldSize * 2.0);
             color += w * texture2D(atlas, atlasUV);
             totalWeight += w;
           }
@@ -497,18 +497,18 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           vec2 posDiff = pos2D - uHeightfieldBase;
           vec2 uvHeightfield = posDiff;
           uvHeightfield /= uHeightfieldSize;
-          // uvHeightfield = mod(uvHeightfield, 1.);
+          uvHeightfield = mod(uvHeightfield, 1.);
           uvHeightfield.x += 0.5 / uHeightfieldSize;
           uvHeightfield.y += 0.5 / uHeightfieldSize;
-          // uvHeightfield.y = 1. - uvHeightfield.y;
-          // float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
+          uvHeightfield.y = 1. - uvHeightfield.y;
+          float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
 
           vec2 posDiffMod = uvHeightfield;
           vec2 tileUv = mod(posDiffMod * 4., 1.);
           vec2 tileOffset = floor(mod(posDiffMod, 1.) * 4.) / 4.;
           vec2 tileSize = vec2(1. / (uHeightfieldSize / uChunkSize * 2.));
           
-          float heightfieldValue = fourTapSample(uHeightfieldFourTap, tileUv, tileOffset, tileSize).r;
+          // float heightfieldValue = fourTapSample(uHeightfieldFourTap, tileUv, tileOffset, tileSize).r;
           // float heightfieldValue = tileOffset.x * 30. + 60.;
 
           pos.y += heightfieldValue;

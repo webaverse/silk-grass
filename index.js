@@ -7,14 +7,16 @@ const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
 
 const localVector = new THREE.Vector3();
 const localVector2 = new THREE.Vector3();
+const localVector3 = new THREE.Vector3();
 // const localQuaternion = new THREE.Quaternion();
 const localEuler = new THREE.Euler();
 const localVector2D = new THREE.Vector2();
-// const localVector2D2 = new THREE.Vector2();
-// const localVector2D3 = new THREE.Vector2();
+const localVector2D2 = new THREE.Vector2();
+const localVector2D3 = new THREE.Vector2();
 const localBox = new THREE.Box3();
 
 const zeroVector = new THREE.Vector3(0, 0, 0);
+const zeroVector2D = new THREE.Vector2(0, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
 const dropItemSize = 0.2;
 const chunkWorldSize = 16;
@@ -395,7 +397,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       uniform sampler2D uHeightfieldFourTap;
       uniform vec2 uHeightfieldBase;
       uniform vec2 uHeightfieldMinPosition;
-      uniform vec2 uHeightfieldPosition;
+      // uniform vec2 uHeightfieldPosition;
       uniform float uChunkSize;
       uniform float uHeightfieldSize;
       // uniform float uHeightfieldRange;
@@ -723,10 +725,10 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           value: heightfieldBase2D,
           needsUpdate: true,
         },
-        uHeightfieldPosition: {
+        /* uHeightfieldPosition: {
           value: new THREE.Vector2(),
           needsUpdate: true,
-        },
+        }, */
         uHeightfieldMinPosition: {
           value: new THREE.Vector2(),
           needsUpdate: true,
@@ -760,21 +762,29 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     // update functions
 
     this.updateCoord = (coord, min2xCoord) => {
-      material.uniforms.uHeightfieldPosition.value.set(coord.x, coord.z)
-        .multiplyScalar(chunkWorldSize)
-        .add(localVector2D.set(-heightfieldSize / 2, -heightfieldSize / 2));
-      material.uniforms.uHeightfieldPosition.needsUpdate = true;
-      material.uniforms.uHeightfieldMinPosition.value.set(min2xCoord.x, min2xCoord.z)
+      const oldHeightfieldPosition = localVector2D.copy(material.uniforms.uHeightfieldMinPosition.value).clone();
+      const newHeightfieldPosition = localVector2D2.set(min2xCoord.x, min2xCoord.z).clone()
         .multiplyScalar(chunkWorldSize);
+      const delta = localVector2D3.copy(newHeightfieldPosition).clone()
+        .sub(oldHeightfieldPosition);
+      
+      material.uniforms.uHeightfieldMinPosition.value.copy(newHeightfieldPosition);
       material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
       
+      // heightfield fourtap
       heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.value
         .copy(material.uniforms.uHeightfieldMinPosition.value);
       heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
     
+      // displacement map
       displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.value
         .copy(material.uniforms.uHeightfieldMinPosition.value);
       displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
+
+      // copy displacement scene
+      if (!delta.equals(zeroVector2D)) {
+        this.renderDisplacementMapDelta(delta);
+      }
     };
     const heightfieldFourTapScene = (() => {
       const fullscreenFragmentShader = `\
@@ -967,12 +977,12 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       scene.camera.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
       scene.camera.updateMatrixWorld();
       
-      scene.update = () => {
+      scene.update = (displacementMapTexture) => {
         const localPlayer = useLocalPlayer();
         fullscreenMaterial.uniforms.uPlayerPosition.value.copy(localPlayer.position);
         fullscreenMaterial.uniforms.uPlayerPosition.needsUpdate = true;
 
-        fullscreenMaterial.uniforms.uDisplacementMap.value = displacementMaps[0].texture;
+        fullscreenMaterial.uniforms.uDisplacementMap.value = displacementMapTexture;
         fullscreenMaterial.uniforms.uDisplacementMap.needsUpdate = true;
 
         // uHeightfieldMinPosition is updated when the coord changes
@@ -985,6 +995,63 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         displacementAnimationMesh.updateMatrixWorld();
         scene.camera.position.copy(displacementAnimationMesh.position);
         scene.camera.updateMatrixWorld();
+      };
+      return scene;
+    })();
+    const displacementCopyScene = (() => {
+      const fullscreenFragmentShader = `\
+        uniform vec2 uPositionDelta;
+        uniform float uHeightfieldSize;
+        uniform sampler2D uDisplacementMap;
+        varying vec2 vUv;
+
+        void main() {
+          vec2 pos2D = vUv;
+          vec2 pd = uPositionDelta;
+          pd /= uHeightfieldSize;
+          // pd.y = 1. - pd.y;
+          pd.y *= -1.;
+          vec2 uv = pos2D + pd;
+          // uv.y = 1. - uv.y;
+          // uv = mod(uv, 1.);
+          if (uv.x >= 0. && uv.x <= 1. && uv.y >= 0. && uv.y <= 1.) {
+            gl_FragColor = texture2D(uDisplacementMap, uv);
+          } else {
+            gl_FragColor = vec4(0.2, 0., 0., 1.);
+          }
+        }
+      `;
+      const fourTapFullscreenMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          uHeightfieldSize: {
+            value: heightfieldSize,
+            needsUpdate: true,
+          },
+          uPositionDelta: {
+            value: new THREE.Vector2(),
+            needsUpdate: true,
+          },
+          uDisplacementMap: {
+            value: displacementMaps[0].texture,
+            needsUpdate: false,
+          },
+        },
+        vertexShader: fullscreenVertexShader,
+        fragmentShader: fullscreenFragmentShader,
+      });
+      const fourTapQuadMesh = new THREE.Mesh(fullScreenQuadGeometry, fourTapFullscreenMaterial);
+      fourTapQuadMesh.frustumCulled = false;
+      const scene = new THREE.Scene();
+      scene.add(fourTapQuadMesh);
+      // scene.mesh = fourTapQuadMesh;
+      scene.update = (positionDelta, displacementMapTexture) => {
+        fourTapFullscreenMaterial.uniforms.uPositionDelta.value.copy(positionDelta);
+        fourTapFullscreenMaterial.uniforms.uPositionDelta.needsUpdate = true;
+
+        fourTapFullscreenMaterial.uniforms.uDisplacementMap.value = displacementMapTexture;
+        fourTapFullscreenMaterial.uniforms.uDisplacementMap.needsUpdate = true;
+
+        console.log('copy');
       };
       return scene;
     })();
@@ -1091,11 +1158,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       fullscreenQuadMesh2.frustumCulled = false;
       const scene2 = new THREE.Scene();
       scene2.add(fullscreenQuadMesh2);
-      scene2.update = (pA1, pA2, pB1, pB2, timestamp) => {
+      scene2.update = (pA1, pA2, pB1, pB2, timestamp, displacementMapTexture) => {
         fullscreenMaterial2.uniforms.uWorldPosition.value.setFromMatrixPosition(mesh.matrixWorld);
         fullscreenMaterial2.uniforms.uWorldPosition.needsUpdate = true;
 
-        fullscreenMaterial2.uniforms.uDisplacementMap.value = displacementMaps[0].texture;
+        fullscreenMaterial2.uniforms.uDisplacementMap.value = displacementMapTexture;
         fullscreenMaterial2.uniforms.uDisplacementMap.needsUpdate = true;
 
         fullscreenMaterial2.uniforms.pA1.value.copy(pA1);
@@ -1205,11 +1272,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     this.renderAnimation = () => {
       const renderer = useRenderer();
       const context = renderer.getContext();
-      const camera = useCamera();
+      // const camera = useCamera();
 
       {
         // update
-        displacementAnimationScene.update();
+        displacementAnimationScene.update(displacementMaps[0].texture);
 
         // push state
         const oldRenderTarget = renderer.getRenderTarget();
@@ -1224,6 +1291,33 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         renderer.setRenderTarget(oldRenderTarget);
         context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
       }
+
+      this.flipRenderTargets();
+    };
+    this.renderDisplacementMapDelta = delta => {
+      const renderer = useRenderer();
+      const context = renderer.getContext();
+      const camera = useCamera();
+
+      {
+        // update
+        displacementCopyScene.update(delta, displacementMaps[0].texture);
+
+        // push state
+        const oldRenderTarget = renderer.getRenderTarget();
+        context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
+
+        // render
+        renderer.setRenderTarget(displacementMaps[1]);
+        renderer.clear();
+        renderer.render(displacementCopyScene, camera);
+
+        // pop state
+        renderer.setRenderTarget(oldRenderTarget);
+        context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
+      }
+      
+      this.flipRenderTargets();
     };
     this.renderCut = (pA1, pA2, pB1, pB2, timestamp) => {
       const renderer = useRenderer();
@@ -1232,7 +1326,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
       {
         // update
-        cutScene.update(pA1, pA2, pB1, pB2, timestamp);
+        cutScene.update(pA1, pA2, pB1, pB2, timestamp, displacementMaps[0].texture);
         
         // push state
         const oldRenderTarget = renderer.getRenderTarget();
@@ -1247,6 +1341,9 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         renderer.setRenderTarget(oldRenderTarget);
         context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
       }
+
+      this.flipRenderTargets();
+
     };
     this.flipRenderTargets = () => {
       const temp = displacementMaps[0];
@@ -1438,7 +1535,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
   }
   update(timestamp, timeDiff) {
     this.renderAnimation();
-    this.flipRenderTargets();
+    // this.flipRenderTargets();
 
     // update material
     const timestampS = timestamp / 1000;

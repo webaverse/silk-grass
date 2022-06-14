@@ -436,8 +436,8 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
         float totalWeight = 0.0;
 
-        // tileUv.x += 0.5 / uHeightfieldSize;
-        // tileUv.y -= 0.5 / uHeightfieldSize;
+        // tileUV.x += 0.5 / uHeightfieldSize;
+        // tileUV.y -= 0.5 / uHeightfieldSize;
 
         // centerUv = mod(centerUv, 0.5) * 0.5;
 
@@ -446,20 +446,20 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
         for (int dx=0; dx<2; ++dx) {
           for (int dy=0; dy<2; ++dy) {
-            vec2 tileCoord = 2.0 * fract(0.5 * (tileUV + vec2(dx,dy)));
-            /* tileUV.y = 1. - tileUV.y;
-            vec2 tileCoord2 = 2.0 * fract(0.5 * (tileUV + vec2(dx,dy)));
-            tileUV.y = 1. - tileUV.y; */
+            // tileUV += 0.5;
+            // vec2 tileCoord = (tileUV * 0.5 + 0.5 * vec2(dx,dy)) * 2.;
+            vec2 tileCoord = 2.0 * mod(0.5 * (tileUV + vec2(dx,dy)), 1.);
+            // tileUV -= 0.5;
       
             //Weight sample based on distance to center
-            float w = pow(min(abs(tileCoord.x-1.0), abs(tileCoord.y-1.0)), 16.);
+            float w = pow(length(tileCoord-1.), 16.);
       
             //Compute atlas coord
             vec2 atlasUV = tileOffset + tileSize * tileCoord;
       
             //Sample and accumulate
             // atlasUV += vec2(0.5, 0.5) / (uHeightfieldSize * 2.0);
-            // atlasUV.y = 1. - atlasUV.y;
+            atlasUV.y = 1. - atlasUV.y;
             // atlasUV += vec2(0.5, 0.5) / (uHeightfieldSize * 2.0);
             color += w * texture2D(atlas, atlasUV);
             totalWeight += w;
@@ -486,31 +486,29 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         vec2 pos2D = offset.xz;
         // pos2D.x += 0.5;
         // pos2D.y += 0.5;
-        const float overflowBuffer = 1.;
+        const float overflowBuffer = 1.5;
         // pos2D += 0.5;
         if (
-          (pos2D.x >= uHeightfieldPosition.x + overflowBuffer &&
-            pos2D.x <= uHeightfieldPosition.x + uHeightfieldSize - overflowBuffer) &&
-          (pos2D.y >= uHeightfieldPosition.y + overflowBuffer &&
-            pos2D.y <= uHeightfieldPosition.y + uHeightfieldSize - overflowBuffer)
+          (pos2D.x >= uHeightfieldMinPosition.x + overflowBuffer &&
+            pos2D.x <= uHeightfieldMinPosition.x + uHeightfieldSize - overflowBuffer) &&
+          (pos2D.y >= uHeightfieldMinPosition.y + overflowBuffer &&
+            pos2D.y <= uHeightfieldMinPosition.y + uHeightfieldSize - overflowBuffer)
         ) {
           vec2 posDiff = pos2D - uHeightfieldBase;
           vec2 uvHeightfield = posDiff;
           uvHeightfield /= uHeightfieldSize;
-          uvHeightfield = mod(uvHeightfield, 1.);
+          // uvHeightfield = mod(uvHeightfield, 1.);
           uvHeightfield.x += 0.5 / uHeightfieldSize;
           uvHeightfield.y += 0.5 / uHeightfieldSize;
-          uvHeightfield.y = 1. - uvHeightfield.y;
-          float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
+          // uvHeightfield.y = 1. - uvHeightfield.y;
+          // float heightfieldValue = texture2D(uHeightfield, uvHeightfield).r;
 
           vec2 posDiffMod = uvHeightfield;
           vec2 tileUv = mod(posDiffMod * 4., 1.);
-          vec2 tileOffset = floor(posDiffMod * 4.) / 4.;
+          vec2 tileOffset = floor(mod(posDiffMod, 1.) * 4.) / 4.;
           vec2 tileSize = vec2(1. / (uHeightfieldSize / uChunkSize * 2.));
           
-          // tileUv += vec2(0.5) / uHeightfieldSize;
-
-          // float heightfieldValue = fourTapSample(uHeightfieldFourTap, tileUv, tileOffset, tileSize).r;
+          float heightfieldValue = fourTapSample(uHeightfieldFourTap, tileUv, tileOffset, tileSize).r;
           // float heightfieldValue = tileOffset.x * 30. + 60.;
 
           pos.y += heightfieldValue;

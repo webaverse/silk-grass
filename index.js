@@ -486,7 +486,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         vec2 pos2D = offset.xz;
         // pos2D.x += 0.5;
         // pos2D.y += 0.5;
-        const float overflowBuffer = 1.5;
+        // const float overflowBuffer = 1.5;
         // pos2D += 0.5;
         /* if (
           (pos2D.x >= uHeightfieldMinPosition.x + overflowBuffer &&

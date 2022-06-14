@@ -408,7 +408,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
-      varying vec2 vF;
+      // varying vec2 vF;
       varying vec3 vNoise;
       // varying vec2 vColor;
 
@@ -466,7 +466,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           }
         }
 
-        vF = tileUV.xy;
+        /* vF = tileUV.xy;
         if (vF.x >= 0.5) {
           vF.x = 1.;
         } else {
@@ -476,7 +476,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           vF.y = 1.;
         } else {
           vF.y = 0.;
-        }
+        } */
       
         return color / totalWeight;
         // return vec4(60.);
@@ -650,7 +650,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
-      varying vec2 vF;
+      // varying vec2 vF;
       varying vec3 vNoise;
       // varying vec2 vColor;
 
@@ -687,10 +687,10 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       void main() {
         vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
         
-        /* gl_FragColor.rgb = color *
+        gl_FragColor.rgb = color *
           (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
-          (0.2 + vY/height * 0.8); */
-        gl_FragColor.rgb = vec3(vF.x, 0., vF.y);
+          (0.2 + vY/height * 0.8);
+        // gl_FragColor.rgb = vec3(vF.x, 0., vF.y);
         gl_FragColor.a = 1.;
       }
     `;

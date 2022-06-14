@@ -676,9 +676,9 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
           (0.2 + vY/height * 0.8);
 
-        gl_FragColor.rgb = vec3(0.);
+        // gl_FragColor.rgb = vec3(0.);
         // gl_FragColor.rb = vUv2;
-        gl_FragColor.rgb = displacementColor.rgb;
+        // gl_FragColor.rgb = displacementColor.rgb;
         // gl_FragColor.rgb = vec3(vF.x, 0., vF.y);
         gl_FragColor.a = 1.;
       }
@@ -1050,8 +1050,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
         fourTapFullscreenMaterial.uniforms.uDisplacementMap.value = displacementMapTexture;
         fourTapFullscreenMaterial.uniforms.uDisplacementMap.needsUpdate = true;
-
-        console.log('copy');
       };
       return scene;
     })();

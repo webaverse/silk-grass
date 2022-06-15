@@ -35,7 +35,7 @@ const numBlades = 4 * 1024;
 const cutTime = 1;
 const growTime = 60;
 const cutGrowTime = cutTime + growTime;
-const cutHeightOffset = -1.4;
+const cutHeightOffset = -1;
 const floorLimit = dropItemSize / 2;
 
 const maxInstancesPerDrawCall = numBlades;

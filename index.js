@@ -525,13 +525,30 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         vec4 displacementColor = texture2D(uDisplacementMap, vUv);
         vTimeDiff = uTime - displacementColor.w;
 
-        // cut handling
+        // compute cut/grow variables
         float segmentStartY = float(segment) * segmentHeight;
         float cutY = displacementColor.z;
         float cutSegmentY = floor(cutY / segmentHeight) * segmentHeight;
         bool isCuttableY = (cutY > 0. && cutY < segmentStartY);
         bool isCut = isCuttableY && (vTimeDiff < cutTime);
         bool isGrow = isCuttableY && (vTimeDiff >= cutTime && vTimeDiff < cutGrowTime);
+
+        // grow
+        if (isGrow) {
+          vec3 bottomOfCutBlade = vec3(0., cutSegmentY /* + segmentHeight */, 0.);
+          float scaleFactor = min((vTimeDiff - cutTime) / growTime, 1.);
+
+          // grow
+          pos -= bottomOfCutBlade;
+          pos.y *= scaleFactor;
+          pos += bottomOfCutBlade;
+        }
+
+        // noise
+        vY = pos.y;
+        vNoise = texture2D(uNoiseTexture, vUvNoise).xyz;
+
+        // cut
         if (isCut) {
           vec3 centerOfBlade = vec3(0., (cutSegmentY + topSegmentY) * 0.5, 0.);
           // float scaleFactor = max(1. - vTimeDiff / cutTime, 0.);
@@ -563,18 +580,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           } else {
             pos = vec3(0.);
           }
-        } else if (isGrow) {
-          vec3 bottomOfBlade = vec3(0., cutSegmentY * 0.5, 0.);
-          float scaleFactor = min((vTimeDiff - cutTime) / growTime, 1.);
-
-          // grow
-          pos -= bottomOfBlade;
-          pos.y *= scaleFactor;
-          pos += bottomOfBlade;
         }
-
-        vY = pos.y;
-        vNoise = texture2D(uNoiseTexture, vUvNoise).xyz;
 
         // instance offset
         {
@@ -1105,6 +1111,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         const float height = ${height.toFixed(8)};
         const float cutTime = ${cutTime.toFixed(8)};
         const float growTime = ${growTime.toFixed(8)};
+        const float heightSegments = ${heightSegments.toFixed(8)};
         void main() {
           vec2 pos2D = vPosition.xz;
           
@@ -1127,7 +1134,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
           vec4 color = texture2D(uDisplacementMap, vUv);
 
-
           vec2 a = pA1.xz;
           vec2 b = pA2.xz;
           vec2 c = pB1.xz;
@@ -1142,7 +1148,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             timeDiff > (cutTime + growTime * 0.5)
           ) {
             // color.z = (pA1.y + pA2.y + pB1.y + pB2.y) / 4.;
-            color.z = height / 8.;
+            color.z = height / heightSegments;
             color.w = uTime;
           }
           gl_FragColor = color;

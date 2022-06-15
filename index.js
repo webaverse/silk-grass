@@ -16,7 +16,7 @@ const localVector2D3 = new THREE.Vector2();
 const localBox = new THREE.Box3();
 
 const zeroVector = new THREE.Vector3(0, 0, 0);
-const zeroVector2D = new THREE.Vector2(0, 0);
+// const zeroVector2D = new THREE.Vector2(0, 0);
 const gravity = new THREE.Vector3(0, -9.8, 0);
 const dropItemSize = 0.2;
 const chunkWorldSize = 16;
@@ -394,7 +394,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       // uniform float uHeightfieldRange;
       attribute int segment;
       varying vec2 vUv;
-      varying vec2 vUv2;
+      varying vec2 vUvNoise;
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
@@ -479,8 +479,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         vec2 uvHeightfield = posDiff;
         uvHeightfield /= uHeightfieldSize;
         
-        vUv2 = uvHeightfield;
-        vUv2.y = 1. - vUv2.y;
+        vUv = uvHeightfield;
+        vUv.y = 1. - vUv.y;
+
+        vec2 vUvNoise = mod(pos2D / uvHeightfield, 1.);
+        vUvNoise.y = 1. - vUvNoise.y;
 
         uvHeightfield.x += 0.5 / uHeightfieldSize;
         uvHeightfield.y += 0.5 / uHeightfieldSize;
@@ -518,10 +521,8 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
         float h = offsetHeight(p);
 
-        vUv = uv;
-
         // time diff
-        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
+        vec4 displacementColor = texture2D(uDisplacementMap, vUv);
         vTimeDiff = uTime - displacementColor.w;
 
         // cut handling
@@ -539,12 +540,12 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           const float GRAVITY = -9.8;
           const float CUT_VELOCITY = 2.;
 
-          vec2 vUv3 = mod(vUv2 * 3., 1.); // to not conflict with rotation axis
-          vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUv3).xz * 2.;
+          vec2 vUvNoise2 = mod(vUvNoise * 3., 1.); // to not conflict with rotation axis
+          vec2 directionXZ = -1. + texture2D(uNoiseTexture, vUvNoise).xz * 2.;
           
           // compute the acceleration / velocity offset
           vec3 gravityVector = vec3(0., GRAVITY * vTimeDiff * vTimeDiff * 0.5, 0.);
-          float cutSpeed = texture2D(uNoiseTexture, vUv2).w * 3.;
+          float cutSpeed = texture2D(uNoiseTexture, vUvNoise).w * 3.;
           vec3 direction = vec3(directionXZ.x, CUT_VELOCITY, directionXZ.y);
           vec3 velocityVector = direction * vTimeDiff * cutSpeed;
 
@@ -552,7 +553,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           if (centerOfBladePositionY >= 0.) {
             // scale + rotation
             pos -= centerOfBlade;
-            vec3 rotationAxis = normalize(-1. + texture2D(uNoiseTexture, vUv2).xyz * 2.);
+            vec3 rotationAxis = normalize(-1. + texture2D(uNoiseTexture, vUvNoise).xyz * 2.);
             vec4 q = quat_from_axis_angle(rotationAxis, uTime * 2. * PI * 0.2);
             pos = rotate_vertex_position(pos, q);
             pos += centerOfBlade;
@@ -573,7 +574,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         }
 
         vY = pos.y;
-        vNoise = texture2D(uNoiseTexture, vUv2).xyz;
+        vNoise = texture2D(uNoiseTexture, vUvNoise).xyz;
 
         // instance offset
         {
@@ -585,7 +586,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         if (!isCut) {
           float windOffsetX = texture2D(
             uSeamlessNoiseTexture,
-            (vUv2 * 0.1) * 3. +
+            (vUvNoise * 0.1) * 3. +
               vec2(uTime * 0.05)
           ).r * pos.y;
           float windOffsetY = 0.;
@@ -598,7 +599,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
         // displacement bend
         if (!isCut) {
-          vec4 displacement = texture2D(uDisplacementMap, vUv2);
+          vec4 displacement = texture2D(uDisplacementMap, vUv);
           pos.xz += displacement.xy * pow(pos.y, 0.5) * 0.5;
         }
 
@@ -622,7 +623,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       uniform sampler2D uDisplacementMap;
       varying float vOffset;
       varying vec2 vUv;
-      varying vec2 vUv2;
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
@@ -661,14 +661,13 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       const float cutTime = ${cutTime.toFixed(8)};
       const vec3 color = vec3(${new THREE.Color(0x66bb6a).toArray().join(', ')});
       void main() {
-        vec4 displacementColor = texture2D(uDisplacementMap, vUv2);
+        vec4 displacementColor = texture2D(uDisplacementMap, vUv);
         
         gl_FragColor.rgb = color *
           (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
           (0.2 + vY/height * 0.8);
-
         // gl_FragColor.rgb = vec3(0.);
-        // gl_FragColor.rb = vUv2;
+        // gl_FragColor.rb = vUv;
         // gl_FragColor.rgb = displacementColor.rgb;
         // gl_FragColor.rgb = vec3(vF.x, 0., vF.y);
         gl_FragColor.a = 1.;
@@ -778,9 +777,9 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       cutScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
 
       // copy displacement scene
-      if (!delta.equals(zeroVector2D)) {
+      // if (!delta.equals(zeroVector2D)) {
         this.renderDisplacementMapDelta(delta);
-      }
+      // }
     };
     const heightfieldFourTapScene = (() => {
       const fullscreenFragmentShader = `\

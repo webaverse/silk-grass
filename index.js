@@ -1633,11 +1633,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
   }
   hitAttempt(position, quaternion, target2D) {
     const pointA1 = position.clone()
-      .add(new THREE.Vector3(-1, cutHeightOffset, -0.1).applyQuaternion(quaternion));
+      .add(new THREE.Vector3(-1.5, cutHeightOffset, -0.1).applyQuaternion(quaternion));
     const pointA2 = position.clone()
       .add(new THREE.Vector3(-0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
     const pointB1 = position.clone()
-      .add(new THREE.Vector3(1, cutHeightOffset, -0.1).applyQuaternion(quaternion));
+      .add(new THREE.Vector3(1.5, cutHeightOffset, -0.1).applyQuaternion(quaternion));
     const pointB2 = position.clone()
       .add(new THREE.Vector3(0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
     /* [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {

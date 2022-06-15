@@ -753,7 +753,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
     this.allocator = allocator;
     this.displacementMaps = displacementMaps;
-    this.cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
+    // this.cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
 
     // update functions
 

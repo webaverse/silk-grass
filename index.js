@@ -482,7 +482,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         vUv = uvHeightfield;
         vUv.y = 1. - vUv.y;
 
-        vec2 vUvNoise = mod(pos2D / uvHeightfield, 1.);
+        vUvNoise = mod(pos2D / uHeightfieldSize, 1.);
         vUvNoise.y = 1. - vUvNoise.y;
 
         uvHeightfield.x += 0.5 / uHeightfieldSize;
@@ -590,11 +590,10 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
         // wind
         if (!isCut) {
-          float windOffsetX = texture2D(
+          float windOffsetX = (texture2D(
             uSeamlessNoiseTexture,
-            (vUvNoise * 0.1) * 3. +
-              vec2(uTime * 0.05)
-          ).r * pos.y;
+            vUvNoise + vec2(uTime * 0.05, 0.)
+          ).r - 0.5) * 2. * pos.y;
           float windOffsetY = 0.;
           float windOffsetZ = 0.;
           vec3 windOffset = vec3(windOffsetX, windOffsetY, windOffsetZ);
@@ -635,6 +634,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       // varying vec2 vF;
       varying vec3 vNoise;
       // varying vec2 vColor;
+      // varying vec2 vUvNoise;
 
       vec3 hueShift( vec3 color, float hueAdjust ){
         const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
@@ -676,6 +676,8 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         // gl_FragColor.rb = vUv;
         // gl_FragColor.rgb = displacementColor.rgb;
         // gl_FragColor.rgb = vec3(vF.x, 0., vF.y);
+        // gl_FragColor.rb = vUvNoise;
+        // gl_FragColor.g = 0.;
         gl_FragColor.a = 1.;
       }
     `;

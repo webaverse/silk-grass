@@ -220,6 +220,13 @@ const getSeamlessNoiseTexture = (() => {
     return noiseTexture;
   };
 })();
+const getAveragePoint = (points, vector) => {
+  vector.set(0, 0, 0);
+  for (let i = 0; i < points.length; i++) {
+    vector.add(points[i]);
+  }
+  return vector.divideScalar(points.length);
+};
 
 const createSilkGrassBladeGeometry = () => {
   const geometryNonInstanced = (() => {
@@ -271,7 +278,8 @@ const silksBaseGeometry = createSilkGrassBladeGeometry();
   const mesh = new THREE.Mesh(geometry, material);
   return mesh;
 }; */
-const _makeRenderTarget = () => new THREE.WebGLRenderTarget(512, 512, {
+const displacementMapSize = heightfieldSize * 4;
+const _makeRenderTarget = () => new THREE.WebGLRenderTarget(displacementMapSize, displacementMapSize, {
   minFilter: THREE.NearestFilter,
   magFilter: THREE.NearestFilter,
   format: THREE.RGBAFormat,
@@ -523,15 +531,16 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
         // time diff
         vec4 displacementColor = texture2D(uDisplacementMap, vUv);
-        vTimeDiff = uTime - displacementColor.w;
+        float cutStartTime = displacementColor.w;
+        vTimeDiff = uTime - cutStartTime;
 
         // compute cut/grow variables
         float segmentStartY = float(segment) * segmentHeight;
-        float cutY = displacementColor.z;
+        float cutY = 0.1;
         float cutSegmentY = floor(cutY / segmentHeight) * segmentHeight;
         bool isCuttableY = (cutY > 0. && cutY < segmentStartY);
         bool isCut = isCuttableY && (vTimeDiff < cutTime);
-        bool isGrow = isCuttableY && (vTimeDiff >= cutTime && vTimeDiff < cutGrowTime);
+        bool isGrow = isCuttableY && (cutStartTime > 0.) && (vTimeDiff >= cutTime && vTimeDiff < cutGrowTime);
 
         // grow
         if (isGrow) {
@@ -850,7 +859,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           vec4 position2 = modelMatrix * vec4(position, 1.0);
           vPosition = position2.xyz;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-
         }
       `;
       const fullscreenFragmentShader = `\
@@ -932,7 +940,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
               oldColor.xy * (1. - learningRate) +
                 (newColor.xy * distanceFactor) * localLearningRate,
             vec2(-1.)), vec2(1.)),
-            newColor.z,
+            -1.,
             newColor.w
           );
           // gl_FragColor = vec4(vUv.x, 0., vUv.y, 1.);
@@ -1020,7 +1028,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           if (uv.x >= 0. && uv.x <= 1. && uv.y >= 0. && uv.y <= 1.) {
             gl_FragColor = texture2D(uDisplacementMap, uv);
           } else {
-            gl_FragColor = vec4(0.2, 0., 0., 1.);
+            gl_FragColor = vec4(0., 0., 0., 0.);
           }
         }
       `;
@@ -1081,6 +1089,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         uniform float uHeightfieldSize;
         uniform vec2 uHeightfieldMinPosition;
         uniform float uTime;
+        uniform float uHitStamp;
         uniform vec3 pA1;
         uniform vec3 pA2;
         uniform vec3 pB1;
@@ -1091,6 +1100,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         const float chunkWorldSize = ${chunkWorldSize.toFixed(8)};
         const float learningRate = 0.005;
         const float maxDistance = 0.6;
+        const float cutYRange = 1.5;
 
         bool isPointInTriangle(vec2 point, vec2 a, vec2 b, vec2 c) {
           vec2 v0 = c - a;
@@ -1146,11 +1156,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             (
               isPointInTriangle(virtual.xz, a, b, c) || isPointInTriangle(virtual.xz, b, d, c)
             ) &&
-            abs(virtual.y - cutHeight) < 1. &&
+            abs(virtual.y - cutHeight) < cutYRange &&
             timeDiff > (cutTime + growTime * 0.5)
           ) {
             // color.z = (pA1.y + pA2.y + pB1.y + pB2.y) / 4.;
-            color.z = height / heightSegments;
+            color.z = uHitStamp;
             color.w = uTime;
           }
           gl_FragColor = color;
@@ -1164,11 +1174,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           }, */
           uWorldPosition: {
             value: new THREE.Vector3(0, 0, 0),
-            needsUpdate: false,
+            needsUpdate: true,
           },
           uDisplacementMap: {
             value: displacementMaps[0].texture,
-            needsUpdate: false,
+            needsUpdate: true,
           },
           uNoiseTexture: {
             value: getNoiseTexture(),
@@ -1176,23 +1186,27 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           },
           uTime: {
             value: 0,
-            needsUpdate: false,
+            needsUpdate: true,
+          },
+          uHitStamp: {
+            value: 0,
+            needsUpdate: true,
           },
           pA1: {
             value: new THREE.Vector3(),
-            needsUpdate: false,
+            needsUpdate: true,
           },
           pA2: {
             value: new THREE.Vector3(),
-            needsUpdate: false,
+            needsUpdate: true,
           },
           pB1: {
             value: new THREE.Vector3(),
-            needsUpdate: false,
+            needsUpdate: true,
           },
           pB2: {
             value: new THREE.Vector3(),
-            needsUpdate: false,
+            needsUpdate: true,
           },
           uHeightfieldMinPosition: {
             value: new THREE.Vector2(),
@@ -1225,7 +1239,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       scene2.camera.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
       scene2.camera.updateMatrixWorld();
 
-      scene2.update = (pA1, pA2, pB1, pB2, timestamp, displacementMapTexture) => {
+      scene2.update = (pA1, pA2, pB1, pB2, hitStamp, timestampS, displacementMapTexture) => {
         // fullscreenMaterial2.uniforms.uWorldPosition.value.setFromMatrixPosition(mesh.matrixWorld);
         // fullscreenMaterial2.uniforms.uWorldPosition.needsUpdate = true;
 
@@ -1245,7 +1259,9 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         fullscreenMaterial2.uniforms.pB2.value.copy(pB2);
         fullscreenMaterial2.uniforms.pB2.needsUpdate = true;
 
-        const timestampS = timestamp / 1000;
+        fullscreenMaterial2.uniforms.uHitStamp.value = hitStamp;
+        fullscreenMaterial2.uniforms.uHitStamp.needsUpdate = true;
+
         fullscreenMaterial2.uniforms.uTime.value = timestampS;
         fullscreenMaterial2.uniforms.uTime.needsUpdate = true;
 
@@ -1402,14 +1418,14 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       
       this.flipRenderTargets();
     };
-    this.renderCut = (pA1, pA2, pB1, pB2, timestamp, displacementMapTexture) => {
+    this.renderCut = (pA1, pA2, pB1, pB2, hitStamp, timestampS, displacementMapTexture) => {
       const renderer = useRenderer();
       const context = renderer.getContext();
       // const camera = useCamera();
 
       {
         // update
-        cutScene.update(pA1, pA2, pB1, pB2, timestamp, displacementMapTexture);
+        cutScene.update(pA1, pA2, pB1, pB2, hitStamp, timestampS, displacementMapTexture);
         
         // push state
         const oldRenderTarget = renderer.getRenderTarget();
@@ -1504,6 +1520,9 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     };
     this.heightfieldRenderTarget = heightfieldRenderTarget;
     this.heightfieldFourTapRenderTarget = heightfieldFourTapRenderTarget;
+
+    // this.lastHitTime = -Infinity;
+    this.hitStamps = 0;
 
     /* // XXX debugging
     const heightfieldMesh = (() => {
@@ -1626,60 +1645,232 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     this.material.uniforms.uDisplacementMap.value = this.displacementMaps[0].texture;
     this.material.uniforms.uDisplacementMap.needsUpdate = true;
 
-    /* // XXX debugging
-    const camera = useCamera();
-    this.heightfieldMesh.position.copy(camera.position)
-      .add(localVector.set(0, 0.5, -2).applyQuaternion(camera.quaternion));
-    this.heightfieldMesh.quaternion.copy(camera.quaternion);
-    this.heightfieldMesh.updateMatrixWorld(); */
+    for (const itemletMesh of this.itemletMeshes) {
+      itemletMesh.update(timestamp, timeDiff);
+    }
   }
-  hitAttempt(position, quaternion, target2D) {
-    const pointA1 = position.clone()
-      .add(new THREE.Vector3(-1.5, cutHeightOffset, -0.1).applyQuaternion(quaternion));
-    const pointA2 = position.clone()
-      .add(new THREE.Vector3(-0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
-    const pointB1 = position.clone()
-      .add(new THREE.Vector3(1.5, cutHeightOffset, -0.1).applyQuaternion(quaternion));
-    const pointB2 = position.clone()
-      .add(new THREE.Vector3(0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
-    /* [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
-      point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
-    });
-    cutMesh.geometry.attributes.position.needsUpdate = true; */
+  itemletMeshes = [];
+  async checkCut(hitStamp) {
+    const renderer = useRenderer();
+    const gl = renderer.getContext();
+
+    const texture = this.displacementMaps[0].texture;
+    const webglTexture = renderer.textures.getTexture(texture);
+    
+    const x = 0;
+    const y = 0;
+    const w = displacementMapSize;
+    const h = displacementMapSize;
+    const format = gl.RGBA;
+    const type = gl.FLOAT;
+    const outputBuffer = new Float32Array(displacementMapSize * displacementMapSize * 4);
+    await renderer.readPixelsAsync(x, y, w, h, format, type, webglTexture, outputBuffer);
+
+    const numCuts = (() => {
+      let numCuts = 0;
+      for (let i = 0; i < outputBuffer.length; i += 4) {
+        const currentHitStamp = outputBuffer[i + 2];
+        if (currentHitStamp === hitStamp) {
+          numCuts++;
+        }
+      }
+      return numCuts;
+    })();
+    return numCuts;
+  }
+  hitAttempt(position, quaternion) {
+    const scene = useScene();
+    const {WebaverseShaderMaterial} = useMaterials();
+    const sounds = useSound();
 
     const timestamp = performance.now();
-    this.renderCut(pointA1, pointA2, pointB1, pointB2, timestamp, this.displacementMaps[0].texture);
+    const timeDiff = timestamp - this.lastHitTime;
 
-    /* const points = [
-      pointA1,
-      pointA2,
-      pointB1,
-      pointB2,
-    ];
-    const hitCenterPoint = _averagePoints(points, new THREE.Vector3());
-    const relativeX = Math.floor(hitCenterPoint.x);
-    const relativeZ = Math.floor(hitCenterPoint.z);    
+    const _dropItemlet = position => {
+      const geometry = new THREE.PlaneBufferGeometry(dropItemSize, dropItemSize)
+        .translate(0, dropItemSize/2, 0);
+      const index = Math.floor(Math.random() * itemletTextures.length);
+      const texture = itemletTextures[index];
+      // const colorPalette = colorPalettes[index];
+      const material = new WebaverseShaderMaterial({
+        uniforms: {
+          cameraBillboardQuaternion: {
+            value: new THREE.Quaternion(),
+            needsUpdate: false,
+          },
+          uTex: {
+            value: texture,
+            needsUpdate: true,
+          },
+          /* color1: {
+            value: new THREE.Color(colorPalette[0]),
+            needsUpdate: true,
+          },
+          color2: {
+            value: new THREE.Color(colorPalette[1]),
+            needsUpdate: true,
+          }, */
+        },
+        vertexShader: `\
+          uniform vec4 cameraBillboardQuaternion;
+          varying vec2 vUv;
 
-    const meshWorldPosition = new THREE.Vector3().setFromMatrixPosition(this.matrixWorld);
-    const meshWorldMin = meshWorldPosition.clone().add(new THREE.Vector3(0, 0, 0));
-    const meshWorldMax = meshWorldPosition.clone().add(new THREE.Vector3(chunkWorldSize, 0, chunkWorldSize));
-    if (
-      relativeX >= meshWorldMin.x && relativeZ >= meshWorldMin.z &&
-      relativeX < meshWorldMax.x && relativeZ < meshWorldMax.z
-    ) {
-      const localX = relativeX - meshWorldMin.x;
-      const localZ = relativeZ - meshWorldMin.z;
-      const index = localX + localZ * chunkWorldSize;
-      const timeDiff = timestamp - this.cutLastTimestampMap[index];
-      if (timeDiff >= (cutTime + growTime / 2) * 1000) {
-        this.cutLastTimestampMap[index] = timestamp;
-        return target2D.set(relativeX + Math.random(), relativeZ + Math.random());
+          vec3 rotate_vertex_position(vec3 position, vec4 q) { 
+            return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
+          }
+
+          void main() {
+            vec3 pos = position;
+
+            pos = rotate_vertex_position(pos, cameraBillboardQuaternion);
+
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+            vUv = uv;
+          }
+        `,
+        fragmentShader: `\
+          uniform sampler2D uTex;
+          // uniform vec3 color1;
+          // uniform vec3 color2;
+          varying vec2 vUv;
+
+          void main() {
+            vec4 displacementColor = texture2D(uTex, vUv);
+            // displacementColor.rgb = mix(color2, color1, vUv.y);
+            gl_FragColor = displacementColor;
+            if (gl_FragColor.a < 0.1) {
+              discard;
+            }
+          }
+        `,
+        side: THREE.DoubleSide,
+        transparent: true,
+      });
+      const itemletMesh = new THREE.Mesh(geometry, material);
+      itemletMesh.position.copy(position)
+        .add(localVector.setY(0, 0.5, 0));
+      itemletMesh.velocity = new THREE.Vector3(-1 + Math.random() * 2, 3, -1 + Math.random() * 2);
+      itemletMesh.frustumCulled = false;
+      scene.add(itemletMesh);
+      itemletMesh.updateMatrixWorld();
+
+      let animation = null;
+      itemletMesh.update = (timestamp, timeDiff) => {
+        const timeDiffS = timeDiff / 1000;
+        const camera = useCamera();
+        const localPlayer = useLocalPlayer();
+
+        localEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+        localEuler.x = 0;
+        localEuler.z = 0;
+        itemletMesh.material.uniforms.cameraBillboardQuaternion.value.setFromEuler(localEuler);
+        itemletMesh.material.uniforms.cameraBillboardQuaternion.needsUpdate = true;
+
+        if (animation) {
+          const timeDiff = timestamp - animation.startTime;
+          const factor = timeDiff / animation.duration;
+          if (factor < 1) {
+            itemletMesh.position.copy(localPlayer.position);
+            itemletMesh.position.y += 0.2 + Math.sin(Math.min(factor * 4, 1) * Math.PI) * 0.1;
+            itemletMesh.updateMatrixWorld();
+          } else {
+            scene.remove(itemletMesh);
+            this.itemletMeshes.splice(this.itemletMeshes.indexOf(itemletMesh), 1);
+          }
+        } else {
+          if (!itemletMesh.velocity.equals(zeroVector)) {
+            itemletMesh.position.add(localVector.copy(itemletMesh.velocity).multiplyScalar(timeDiffS));
+            itemletMesh.velocity.add(localVector.copy(gravity).multiplyScalar(timeDiffS));
+            if (itemletMesh.position.y < floorLimit) {
+              itemletMesh.position.y = floorLimit;
+              itemletMesh.velocity.set(0, 0, 0);
+            }
+            itemletMesh.updateMatrixWorld();
+          } else {
+            const localPosition = localVector.copy(localPlayer.position);
+            localPosition.y -= localPlayer.avatar.height;
+
+            if (localPosition.distanceTo(itemletMesh.position) < 0.5) {
+              animation = {
+                startTime: timestamp,
+                duration: 1000,
+              };
+            }
+          }
+        }
+      };
+
+      this.itemletMeshes.push(itemletMesh);
+    };
+
+    // if (timeDiff >= 100) {
+      const pointA1 = position.clone()
+        .add(new THREE.Vector3(-1.5, cutHeightOffset, 0.1).applyQuaternion(quaternion));
+      const pointA2 = position.clone()
+        .add(new THREE.Vector3(-0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
+      const pointB1 = position.clone()
+        .add(new THREE.Vector3(1.5, cutHeightOffset, 0.1).applyQuaternion(quaternion));
+      const pointB2 = position.clone()
+        .add(new THREE.Vector3(0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
+      /* [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
+        point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
+      });
+      cutMesh.geometry.attributes.position.needsUpdate = true; */
+
+      const hitStamp = ++this.hitStamps;
+      const timestampS = timestamp / 1000;
+      this.renderCut(pointA1, pointA2, pointB1, pointB2, hitStamp, timestampS, this.displacementMaps[0].texture);
+
+      // check if we cut anything
+      (async () => {
+        const numCuts = await this.checkCut(hitStamp);
+        // const cut = numCuts > 0;
+        const cut = numCuts >= 8;
+        // const strong = numCuts >= 8;
+        if (cut) {
+          sounds.playSoundName('bushCut');
+
+          // if (strong) {
+            // console.log('got cut', hitStamp);
+            const pointAverage = getAveragePoint([pointA1, pointA2, pointB1, pointB2], new THREE.Vector3());
+            _dropItemlet(pointAverage);
+          // }
+        }
+      })();
+
+      /* const points = [
+        pointA1,
+        pointA2,
+        pointB1,
+        pointB2,
+      ];
+      const hitCenterPoint = _averagePoints(points, new THREE.Vector3());
+      const relativeX = Math.floor(hitCenterPoint.x);
+      const relativeZ = Math.floor(hitCenterPoint.z);    
+
+      const meshWorldPosition = new THREE.Vector3().setFromMatrixPosition(this.matrixWorld);
+      const meshWorldMin = meshWorldPosition.clone().add(new THREE.Vector3(0, 0, 0));
+      const meshWorldMax = meshWorldPosition.clone().add(new THREE.Vector3(chunkWorldSize, 0, chunkWorldSize));
+      if (
+        relativeX >= meshWorldMin.x && relativeZ >= meshWorldMin.z &&
+        relativeX < meshWorldMax.x && relativeZ < meshWorldMax.z
+      ) {
+        const localX = relativeX - meshWorldMin.x;
+        const localZ = relativeZ - meshWorldMin.z;
+        const index = localX + localZ * chunkWorldSize;
+        const timeDiff = timestamp - this.cutLastTimestampMap[index];
+        if (timeDiff >= (cutTime + growTime / 2) * 1000) {
+          this.cutLastTimestampMap[index] = timestamp;
+          return target2D.set(relativeX + Math.random(), relativeZ + Math.random());
+        } else {
+          return null;
+        }
       } else {
         return null;
-      }
-    } else {
-      return null;
-    } */
+      } */
+
+    //   this.lastHitTime = timestamp;
+    // }
   }
 };
 
@@ -1724,13 +1915,12 @@ class GrassChunkGenerator {
   }
 }
 
+let itemletTextures = null;
+
 export default e => {
   const app = useApp();
-  const scene = useScene();
-  const {WebaverseShaderMaterial} = useMaterials();
   const hitManager = useHitManager();
   const {LodChunkTracker} = useLodder();
-  const sounds = useSound();
 
   app.name = 'silk-grass';
 
@@ -1756,7 +1946,6 @@ export default e => {
 
   // itemlets support
   // XXX this should be a type of drop in the drop manager
-  let itemletTextures = null;
   e.waitUntil((async () => {
     itemletTextures = await Promise.all(itemletImageUrls.map(url => {
       return new Promise((resolve, reject) => {
@@ -1779,129 +1968,8 @@ export default e => {
     }));
   })());
 
-  const itemletMeshes = [];
-  const _dropItemlet = position2D => {
-    const geometry = new THREE.PlaneBufferGeometry(dropItemSize, dropItemSize)
-      .translate(0, dropItemSize/2, 0);
-    const index = Math.floor(Math.random() * itemletTextures.length);
-    const texture = itemletTextures[index];
-    // const colorPalette = colorPalettes[index];
-    const material = new WebaverseShaderMaterial({
-      uniforms: {
-        cameraBillboardQuaternion: {
-          value: new THREE.Quaternion(),
-          needsUpdate: false,
-        },
-        uTex: {
-          value: texture,
-          needsUpdate: true,
-        },
-        /* color1: {
-          value: new THREE.Color(colorPalette[0]),
-          needsUpdate: true,
-        },
-        color2: {
-          value: new THREE.Color(colorPalette[1]),
-          needsUpdate: true,
-        }, */
-      },
-      vertexShader: `\
-        uniform vec4 cameraBillboardQuaternion;
-        varying vec2 vUv;
-
-        vec3 rotate_vertex_position(vec3 position, vec4 q) { 
-          return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
-        }
-
-        void main() {
-          vec3 pos = position;
-
-          pos = rotate_vertex_position(pos, cameraBillboardQuaternion);
-
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-          vUv = uv;
-        }
-      `,
-      fragmentShader: `\
-        uniform sampler2D uTex;
-        // uniform vec3 color1;
-        // uniform vec3 color2;
-        varying vec2 vUv;
-
-        void main() {
-          vec4 displacementColor = texture2D(uTex, vUv);
-          // displacementColor.rgb = mix(color2, color1, vUv.y);
-          gl_FragColor = displacementColor;
-          if (gl_FragColor.a < 0.1) {
-            discard;
-          }
-        }
-      `,
-      side: THREE.DoubleSide,
-      transparent: true,
-    });
-    const itemletMesh = new THREE.Mesh(geometry, material);
-    itemletMesh.position.set(position2D.x, 0.5, position2D.y);
-    itemletMesh.velocity = new THREE.Vector3(-1 + Math.random() * 2, 3, -1 + Math.random() * 2);
-    itemletMesh.frustumCulled = false;
-    scene.add(itemletMesh);
-    itemletMesh.updateMatrixWorld();
-
-    let animation = null;
-    itemletMesh.update = (timestamp, timeDiff) => {
-      const timeDiffS = timeDiff / 1000;
-      const camera = useCamera();
-      const localPlayer = useLocalPlayer();
-
-      localEuler.setFromQuaternion(camera.quaternion, 'YXZ');
-      localEuler.x = 0;
-      localEuler.z = 0;
-      itemletMesh.material.uniforms.cameraBillboardQuaternion.value.setFromEuler(localEuler);
-      itemletMesh.material.uniforms.cameraBillboardQuaternion.needsUpdate = true;
-
-      if (animation) {
-        const timeDiff = timestamp - animation.startTime;
-        const factor = timeDiff / animation.duration;
-        if (factor < 1) {
-          itemletMesh.position.copy(localPlayer.position);
-          itemletMesh.position.y += 0.2 + Math.sin(Math.min(factor * 4, 1) * Math.PI) * 0.1;
-          itemletMesh.updateMatrixWorld();
-        } else {
-          scene.remove(itemletMesh);
-          itemletMeshes.splice(itemletMeshes.indexOf(itemletMesh), 1);
-        }
-      } else {
-        if (!itemletMesh.velocity.equals(zeroVector)) {
-          itemletMesh.position.add(localVector.copy(itemletMesh.velocity).multiplyScalar(timeDiffS));
-          itemletMesh.velocity.add(localVector.copy(gravity).multiplyScalar(timeDiffS));
-          if (itemletMesh.position.y < floorLimit) {
-            itemletMesh.position.y = floorLimit;
-            itemletMesh.velocity.set(0, 0, 0);
-          }
-          itemletMesh.updateMatrixWorld();
-        } else {
-          const localPosition = localVector.copy(localPlayer.position);
-          localPosition.y -= localPlayer.avatar.height;
-
-          if (localPosition.distanceTo(itemletMesh.position) < 0.5) {
-            animation = {
-              startTime: timestamp,
-              duration: 1000,
-            };
-          }
-        }
-      }
-    };
-
-    itemletMeshes.push(itemletMesh);
-  };
-
   useFrame(({timestamp, timeDiff}) => {
     generator.update(timestamp, timeDiff);
-    
-    for (const itemletMesh of itemletMeshes) {
-      itemletMesh.update(timestamp, timeDiff);
-    }
   });
 
   // XXX
@@ -1913,12 +1981,7 @@ export default e => {
         quaternion,
         // hitHalfHeight,
       } = args;
-      const hitTarget2D = generator.hitAttempt(position, quaternion, localVector2D);
-      if (hitTarget2D) {
-        _dropItemlet(hitTarget2D);
-
-        sounds.playSoundName('bushCut');
-      }
+      generator.hitAttempt(position, quaternion);
     }
   });
   

@@ -1920,7 +1920,6 @@ let itemletTextures = null;
 export default e => {
   const app = useApp();
   const hitManager = useHitManager();
-  const {LodChunkTracker} = useLodder();
   const procGenManager = useProcGenManager();
 
   app.name = 'silk-grass';
@@ -1930,10 +1929,26 @@ export default e => {
   const generator = new GrassChunkGenerator({
     procGenInstance,
   });
-  const tracker = new LodChunkTracker(generator, {
+  /* const tracker = new LodChunkTracker(generator, {
     chunkWorldSize,
     numLods,
+  }); */
+  const numLods = 1;
+  const tracker = procGenInstance.getChunkTracker({
+    numLods,
+    // trackY: true,
+    // relod: true,
   });
+  const chunkadd = e => {
+    const {chunk} = e.data;
+    generator.generateChunk(chunk);
+  };
+  tracker.addEventListener('chunkadd', chunkadd);
+  const chunkremove = e => {
+    const {chunk} = e.data;
+    generator.disposeChunk(chunk);
+  };
+  tracker.addEventListener('chunkremove', chunkremove);
 
   const chunksMesh = generator.getChunks();
   app.add(chunksMesh);
@@ -1952,7 +1967,8 @@ export default e => {
   });
 
   useCleanup(() => {
-    tracker.removeEventListener('coordupdate', coordupdate);
+    tracker.destroy();
+    // tracker.removeEventListener('coordupdate', coordupdate);
   });
 
   // itemlets support

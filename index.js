@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
-const {useFrame, useApp, useScene, useSound, useMaterials, useInstancing, useRenderer, useCamera, useProcGen, useDcWorkerManager, useLocalPlayer, useHitManager, useLodder} = metaversefile;
+const {useFrame, useCleanup, useApp, useScene, useSound, useMaterials, useInstancing, useRenderer, useCamera, useProcGen, useDcWorkerManager, useLocalPlayer, useHitManager, useLodder} = metaversefile;
 
 const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
 
@@ -1934,14 +1934,20 @@ export default e => {
   app.add(chunksMesh);
   chunksMesh.updateMatrixWorld();
 
-  tracker.addEventListener('coordupdate', e => {
+  const coordupdate = e => {
     const {coord, min2xCoord} = e.data;
     chunksMesh.updateCoord(coord, min2xCoord);
-  });
+  };
+  tracker.addEventListener('coordupdate', coordupdate);
 
-  useFrame(() => {
+  useFrame(({timestamp, timeDiff}) => {
     const localPlayer = useLocalPlayer();
     tracker.update(localPlayer.position);
+    generator.update(timestamp, timeDiff);
+  });
+
+  useCleanup(() => {
+    tracker.removeEventListener('coordupdate', coordupdate);
   });
 
   // itemlets support
@@ -1967,10 +1973,6 @@ export default e => {
       });
     }));
   })());
-
-  useFrame(({timestamp, timeDiff}) => {
-    generator.update(timestamp, timeDiff);
-  });
 
   // XXX
   hitManager.addEventListener('hitattempt', e => {

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import metaversefile from 'metaversefile';
-const {useFrame, useCleanup, useApp, useScene, useSound, useMaterials, useInstancing, useRenderer, useCamera, useProcGen, useDcWorkerManager, useLocalPlayer, useHitManager, useLodder} = metaversefile;
+const {useFrame, useCleanup, useApp, useScene, useSound, useMaterials, useInstancing, useRenderer, useCamera, useProcGen, useProcGenManager, useLocalPlayer, useHitManager, useLodder} = metaversefile;
 
 const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
 
@@ -303,9 +303,8 @@ const _makeHeightfieldRenderTarget = (w, h) => new THREE.WebGLRenderTarget(w, h,
   anisotropy: maxAnisotropy,
   // flipY: false,
 });
-const _getHeightfieldChunk = async (minX, minZ, lod) => {
-  const dcWorkerManager = useDcWorkerManager();
-  const heightfield = await dcWorkerManager.getHeightfieldRange(
+const _getHeightfieldChunk = async (procGenInstance, minX, minZ, lod) => {
+  const heightfield = await procGenInstance.dcWorkerManager.getHeightfieldRange(
     minX, minZ,
     chunkWorldSize, chunkWorldSize,
     lod
@@ -314,7 +313,9 @@ const _getHeightfieldChunk = async (minX, minZ, lod) => {
 };
 const {InstancedBatchedMesh, InstancedGeometryAllocator} = useInstancing();
 class SilkGrassMesh extends InstancedBatchedMesh {
-  constructor() {
+  constructor({
+    procGenInstance,
+  }) {
     const {WebaverseShaderMaterial} = useMaterials();
 
     const displacementMaps = [
@@ -761,7 +762,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     this.frustumCulled = false;
 
     // local members
-
+    this.procGenInstance = procGenInstance;
     this.allocator = allocator;
     this.displacementMaps = displacementMaps;
     // this.cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
@@ -1551,9 +1552,8 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       await Promise.all([
         (async () => {
           const _getGrassData = async () => {
-            const dcWorkerManager = useDcWorkerManager();
             const lod = 1;
-            const result = await dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
+            const result = await this.procGenInstance.dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
             return result;
           };
           const result = await _getGrassData();
@@ -1591,7 +1591,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         })(),
         (async () => {
           const lod = 1;
-          const heightfield = await _getHeightfieldChunk(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
+          const heightfield = await _getHeightfieldChunk(this.procGenInstance, chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
           if (!live) return;
           // console.log('got heightfield', chunk.x, chunk.z, heightfield);
 
@@ -1875,12 +1875,12 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 };
 
 class GrassChunkGenerator {
-  constructor(parent) {
-    // parameters
-    this.parent = parent;
-
-    // mesh
-    this.mesh = new SilkGrassMesh();
+  constructor({
+    procGenInstance,
+  }) {
+    this.mesh = new SilkGrassMesh({
+      procGenInstance,
+    });
   }
   getChunks() {
     return this.mesh;
@@ -1921,10 +1921,15 @@ export default e => {
   const app = useApp();
   const hitManager = useHitManager();
   const {LodChunkTracker} = useLodder();
+  const procGenManager = useProcGenManager();
 
   app.name = 'silk-grass';
 
-  const generator = new GrassChunkGenerator(this);
+  const procGenInstance = procGenManager.getInstance(null);
+
+  const generator = new GrassChunkGenerator({
+    procGenInstance,
+  });
   const tracker = new LodChunkTracker(generator, {
     chunkWorldSize,
     numLods,

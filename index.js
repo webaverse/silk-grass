@@ -750,7 +750,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     this.allocator = allocator;
     this.displacementMaps = displacementMaps;
     this.heightfieldMapper = heightfieldMapper;
-    // this.cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
 
     // update functions
 
@@ -780,9 +779,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       cutScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
 
       // copy displacement scene
-      // if (!delta.equals(zeroVector2D)) {
-        this.renderDisplacementMapDelta(delta);
-      // }
+      this.renderDisplacementMapDelta(delta);
     };
     const heightfieldFourTapScene = (() => {
       const fullscreenFragmentShader = `\
@@ -1667,7 +1664,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     const sounds = useSound();
 
     const timestamp = performance.now();
-    const timeDiff = timestamp - this.lastHitTime;
 
     const _dropItemlet = position => {
       const geometry = new THREE.PlaneBufferGeometry(dropItemSize, dropItemSize)
@@ -1786,74 +1782,34 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       this.itemletMeshes.push(itemletMesh);
     };
 
-    // if (timeDiff >= 100) {
-      const pointA1 = position.clone()
-        .add(new THREE.Vector3(-1.5, cutHeightOffset, 0.1).applyQuaternion(quaternion));
-      const pointA2 = position.clone()
-        .add(new THREE.Vector3(-0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
-      const pointB1 = position.clone()
-        .add(new THREE.Vector3(1.5, cutHeightOffset, 0.1).applyQuaternion(quaternion));
-      const pointB2 = position.clone()
-        .add(new THREE.Vector3(0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
-      /* [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
-        point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
-      });
-      cutMesh.geometry.attributes.position.needsUpdate = true; */
+    const pointA1 = position.clone()
+      .add(new THREE.Vector3(-1.5, cutHeightOffset, 0.1).applyQuaternion(quaternion));
+    const pointA2 = position.clone()
+      .add(new THREE.Vector3(-0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
+    const pointB1 = position.clone()
+      .add(new THREE.Vector3(1.5, cutHeightOffset, 0.1).applyQuaternion(quaternion));
+    const pointB2 = position.clone()
+      .add(new THREE.Vector3(0.7, cutHeightOffset, -1.5).applyQuaternion(quaternion));
+    /* [pointA1, pointA2, pointB1, pointB2].forEach((point, i) => {
+      point.toArray(cutMesh.geometry.attributes.position.array, i * 3);
+    });
+    cutMesh.geometry.attributes.position.needsUpdate = true; */
 
-      const hitStamp = ++this.hitStamps;
-      const timestampS = timestamp / 1000;
-      this.renderCut(pointA1, pointA2, pointB1, pointB2, hitStamp, timestampS, this.displacementMaps[0].texture);
+    const hitStamp = ++this.hitStamps;
+    const timestampS = timestamp / 1000;
+    this.renderCut(pointA1, pointA2, pointB1, pointB2, hitStamp, timestampS, this.displacementMaps[0].texture);
 
-      // check if we cut anything
-      (async () => {
-        const numCuts = await this.checkCut(hitStamp);
-        // const cut = numCuts > 0;
-        const cut = numCuts >= 8;
-        // const strong = numCuts >= 8;
-        if (cut) {
-          sounds.playSoundName('bushCut');
+    // check if we cut anything
+    (async () => {
+      const numCuts = await this.checkCut(hitStamp);
+      const cut = numCuts >= 8;
+      if (cut) {
+        sounds.playSoundName('bushCut');
 
-          // if (strong) {
-            // console.log('got cut', hitStamp);
-            const pointAverage = getAveragePoint([pointA1, pointA2, pointB1, pointB2], new THREE.Vector3());
-            _dropItemlet(pointAverage);
-          // }
-        }
-      })();
-
-      /* const points = [
-        pointA1,
-        pointA2,
-        pointB1,
-        pointB2,
-      ];
-      const hitCenterPoint = _averagePoints(points, new THREE.Vector3());
-      const relativeX = Math.floor(hitCenterPoint.x);
-      const relativeZ = Math.floor(hitCenterPoint.z);    
-
-      const meshWorldPosition = new THREE.Vector3().setFromMatrixPosition(this.matrixWorld);
-      const meshWorldMin = meshWorldPosition.clone().add(new THREE.Vector3(0, 0, 0));
-      const meshWorldMax = meshWorldPosition.clone().add(new THREE.Vector3(chunkWorldSize, 0, chunkWorldSize));
-      if (
-        relativeX >= meshWorldMin.x && relativeZ >= meshWorldMin.z &&
-        relativeX < meshWorldMax.x && relativeZ < meshWorldMax.z
-      ) {
-        const localX = relativeX - meshWorldMin.x;
-        const localZ = relativeZ - meshWorldMin.z;
-        const index = localX + localZ * chunkWorldSize;
-        const timeDiff = timestamp - this.cutLastTimestampMap[index];
-        if (timeDiff >= (cutTime + growTime / 2) * 1000) {
-          this.cutLastTimestampMap[index] = timestamp;
-          return target2D.set(relativeX + Math.random(), relativeZ + Math.random());
-        } else {
-          return null;
-        }
-      } else {
-        return null;
-      } */
-
-    //   this.lastHitTime = timestamp;
-    // }
+        const pointAverage = getAveragePoint([pointA1, pointA2, pointB1, pointB2], new THREE.Vector3());
+        _dropItemlet(pointAverage);
+      }
+    })();
   }
 };
 

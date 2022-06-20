@@ -287,21 +287,6 @@ const _makeRenderTarget = () => new THREE.WebGLRenderTarget(displacementMapSize,
   wrapT: THREE.ClampToEdgeWrapping,
   stencilBuffer: false,
 });
-const _makeHeightfieldRenderTarget = (w, h) => new THREE.WebGLRenderTarget(w, h, {
-  minFilter: THREE.LinearFilter,
-  magFilter: THREE.LinearFilter,
-  // minFilter: THREE.NearestFilter,
-  // magFilter: THREE.NearestFilter,
-  format: THREE.RedFormat,
-  type: THREE.FloatType,
-  // wrapS: THREE.RepeatWrapping,
-  // wrapT: THREE.RepeatWrapping,
-  wrapS: THREE.ClampToEdgeWrapping,
-  wrapT: THREE.ClampToEdgeWrapping,
-  stencilBuffer: false,
-  anisotropy: maxAnisotropy,
-  // flipY: false,
-});
 const _getHeightfieldChunk = async (procGenInstance, minX, minZ, lod) => {
   const heightfield = await procGenInstance.dcWorkerManager.getHeightfieldRange(
     minX, minZ,
@@ -347,8 +332,8 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
     // main material
 
-    const heightfieldRenderTarget = _makeHeightfieldRenderTarget(heightfieldSize, heightfieldSize);
-    const heightfieldFourTapRenderTarget = _makeHeightfieldRenderTarget(heightfieldSize, heightfieldSize);
+    const heightfieldMapper = procGenInstance.getHeightfieldMapper();
+
     // heightfieldRenderTarget.texture.flipY = false;
     // window.heightfieldRenderTarget = heightfieldRenderTarget;
 
@@ -721,11 +706,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           needsUpdate: true,
         },
         uHeightfield: {
-          value: heightfieldRenderTarget.texture,
+          value: heightfieldMapper.heightfieldRenderTarget.texture,
           needsUpdate: true,
         },
         uHeightfieldFourTap: {
-          value: heightfieldFourTapRenderTarget.texture,
+          value: heightfieldMapper.heightfieldFourTapRenderTarget.texture,
           needsUpdate: true,
         },
         uHeightfieldBase: {
@@ -764,6 +749,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     this.procGenInstance = procGenInstance;
     this.allocator = allocator;
     this.displacementMaps = displacementMaps;
+    this.heightfieldMapper = heightfieldMapper;
     // this.cutLastTimestampMap = new Float32Array(chunkWorldSize ** 2);
 
     // update functions
@@ -817,7 +803,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       const fourTapFullscreenMaterial = new THREE.ShaderMaterial({
         uniforms: {
           uHeightfield: {
-            value: heightfieldRenderTarget.texture,
+            value: heightfieldMapper.heightfieldRenderTarget.texture,
             needsUpdate: true,
           },
           uHeightfieldSize: {
@@ -970,7 +956,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             needsUpdate: true,
           },
           uHeightfieldFourTap: {
-            value: heightfieldFourTapRenderTarget.texture,
+            value: heightfieldMapper.heightfieldFourTapRenderTarget.texture,
             needsUpdate: true,
           },
         },
@@ -1213,11 +1199,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             needsUpdate: true,
           },
           uHeightfield: {
-            value: heightfieldRenderTarget.texture,
+            value: heightfieldMapper.heightfieldRenderTarget.texture,
             needsUpdate: true,
           },
           uHeightfieldFourTap: {
-            value: heightfieldFourTapRenderTarget.texture,
+            value: heightfieldMapper.heightfieldFourTapRenderTarget.texture,
             needsUpdate: true,
           },
           uHeightfieldSize: {
@@ -1463,7 +1449,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
 
         // render
-        renderer.setRenderTarget(heightfieldRenderTarget);
+        renderer.setRenderTarget(heightfieldMapper.heightfieldRenderTarget);
         // renderer.clear();
         renderer.render(heightfieldScene, heightfieldScene.camera);
 
@@ -1486,7 +1472,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
 
         // render
-        renderer.setRenderTarget(heightfieldRenderTarget);
+        renderer.setRenderTarget(heightfieldMapper.heightfieldRenderTarget);
         // renderer.clear();
         renderer.render(heightfieldScene, heightfieldScene.camera);
 
@@ -1509,7 +1495,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
 
         // render
-        renderer.setRenderTarget(heightfieldFourTapRenderTarget);
+        renderer.setRenderTarget(heightfieldMapper.heightfieldFourTapRenderTarget);
         // renderer.clear();
         renderer.render(heightfieldFourTapScene, camera);
 
@@ -1518,8 +1504,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
       }
     };
-    this.heightfieldRenderTarget = heightfieldRenderTarget;
-    this.heightfieldFourTapRenderTarget = heightfieldFourTapRenderTarget;
 
     // this.lastHitTime = -Infinity;
     this.hitStamps = 0;

@@ -753,19 +753,19 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     // update functions
 
     this.updateCoord = (coord, min2xCoord) => {
-      const delta = heightfieldMapper.updateCoord(min2xCoord, localVector2D);
+      const delta = this.heightfieldMapper.updateCoord(min2xCoord, localVector2D);
       
-      material.uniforms.uHeightfieldMinPosition.value.copy(heightfieldMapper.heightfieldMinPosition);
+      material.uniforms.uHeightfieldMinPosition.value.copy(this.heightfieldMapper.heightfieldMinPosition);
       material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
     
       // displacement animation
       displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.value
-        .copy(heightfieldMapper.heightfieldMinPosition);
+        .copy(this.heightfieldMapper.heightfieldMinPosition);
       displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
 
       // cut
       cutScene.mesh.material.uniforms.uHeightfieldMinPosition.value
-        .copy(heightfieldMapper.heightfieldMinPosition);
+        .copy(this.heightfieldMapper.heightfieldMinPosition);
       cutScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
 
       // copy displacement scene
@@ -775,7 +775,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       const heightfieldPlaneGeometry = new THREE.PlaneBufferGeometry(1, 1)
         .rotateX(-Math.PI / 2)
         .translate(0.5, 0, 0.5)
-        .scale(this.heightfieldMapper.terrainSize, 1, this.heightfieldMapper.terrainSize);
+        .scale(heightfieldMapper.terrainSize, 1, heightfieldMapper.terrainSize);
       const displacementVertexShader = `\
         uniform vec2 uHeightfieldMinPosition;
         uniform float uHeightfieldSize;
@@ -890,7 +890,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             needsUpdate: true,
           },
           uHeightfieldSize: {
-            value: this.heightfieldMapper.terrainSize,
+            value: heightfieldMapper.terrainSize,
             needsUpdate: true,
           },
           uHeightfieldMinPosition: {
@@ -913,8 +913,8 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       scene.mesh = displacementAnimationMesh;
 
       scene.camera = new THREE.OrthographicCamera(
-        0, this.heightfieldMapper.terrainSize,
-        0, -this.heightfieldMapper.terrainSize,
+        0, heightfieldMapper.terrainSize,
+        0, -heightfieldMapper.terrainSize,
         -1000, 1000
       );
       scene.camera.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
@@ -967,7 +967,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       const fourTapFullscreenMaterial = new THREE.ShaderMaterial({
         uniforms: {
           uHeightfieldSize: {
-            value: this.heightfieldMapper.terrainSize,
+            value: heightfieldMapper.terrainSize,
             needsUpdate: true,
           },
           uPositionDelta: {
@@ -1000,7 +1000,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       const cutGeometry = new THREE.PlaneBufferGeometry(1, 1)
         .rotateX(-Math.PI / 2)
         .translate(0.5, 0, 0.5)
-        .scale(this.heightfieldMapper.terrainSize, 1, this.heightfieldMapper.terrainSize);
+        .scale(heightfieldMapper.terrainSize, 1, heightfieldMapper.terrainSize);
       const cutVertexShader = `\
         // uniform vec2 uHeightfieldMinPosition;
         // uniform float uHeightfieldSize;
@@ -1153,7 +1153,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             needsUpdate: true,
           },
           uHeightfieldSize: {
-            value: this.heightfieldMapper.terrainSize,
+            value: heightfieldMapper.terrainSize,
             needsUpdate: true,
           },
         },
@@ -1168,8 +1168,8 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       scene2.mesh = fullscreenQuadMesh2;
       
       scene2.camera = new THREE.OrthographicCamera(
-        0, this.heightfieldMapper.terrainSize,
-        0, -this.heightfieldMapper.terrainSize,
+        0, heightfieldMapper.terrainSize,
+        0, -heightfieldMapper.terrainSize,
         -1000, 1000
       );
       scene2.camera.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);

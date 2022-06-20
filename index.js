@@ -754,28 +754,24 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     // update functions
 
     this.updateCoord = (coord, min2xCoord) => {
-      const oldHeightfieldPosition = localVector2D.copy(material.uniforms.uHeightfieldMinPosition.value).clone();
-      const newHeightfieldPosition = localVector2D2.set(min2xCoord.x, min2xCoord.z).clone()
-        .multiplyScalar(chunkWorldSize);
-      const delta = localVector2D3.copy(newHeightfieldPosition).clone()
-        .sub(oldHeightfieldPosition);
+      const delta = heightfieldMapper.updateCoord(min2xCoord, localVector2D);
       
-      material.uniforms.uHeightfieldMinPosition.value.copy(newHeightfieldPosition);
+      material.uniforms.uHeightfieldMinPosition.value.copy(heightfieldMapper.heightfieldMinPosition);
       material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
       
       // heightfield fourtap
       heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.value
-        .copy(material.uniforms.uHeightfieldMinPosition.value);
+        .copy(heightfieldMapper.heightfieldMinPosition);
       heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
     
       // displacement animation
       displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.value
-        .copy(material.uniforms.uHeightfieldMinPosition.value);
+        .copy(heightfieldMapper.heightfieldMinPosition);
       displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
 
       // cut
       cutScene.mesh.material.uniforms.uHeightfieldMinPosition.value
-        .copy(material.uniforms.uHeightfieldMinPosition.value);
+        .copy(heightfieldMapper.heightfieldMinPosition);
       cutScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
 
       // copy displacement scene

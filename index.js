@@ -1923,7 +1923,16 @@ export default e => {
 
   app.name = 'silk-grass';
 
-  const procGenInstance = procGenManager.getInstance(null);
+  const seed = app.getComponent('seed') ?? null;
+  let range = app.getComponent('range') ?? null;
+  if (range) {
+    range = new THREE.Box3(
+      new THREE.Vector3(range[0][0], range[0][1], range[0][2]),
+      new THREE.Vector3(range[1][0], range[1][1], range[1][2])
+    );
+  }
+
+  const procGenInstance = procGenManager.getInstance(seed, range);
 
   const generator = new GrassChunkGenerator({
     procGenInstance,
@@ -1938,6 +1947,7 @@ export default e => {
     // trackY: true,
     // relod: true,
   });
+  // tracker.name = 'silk-grass';
   const chunkadd = e => {
     const {chunk} = e.data;
     generator.generateChunk(chunk);
@@ -1948,6 +1958,7 @@ export default e => {
     generator.disposeChunk(chunk);
   };
   tracker.addEventListener('chunkremove', chunkremove);
+  // tracker.emitEvents(chunkadd);
 
   const chunksMesh = generator.getChunks();
   app.add(chunksMesh);
@@ -1961,7 +1972,7 @@ export default e => {
 
   useFrame(({timestamp, timeDiff}) => {
     const localPlayer = useLocalPlayer();
-    tracker.update(localPlayer.position);
+    !range && tracker.update(localPlayer.position);
     generator.update(timestamp, timeDiff);
   });
 

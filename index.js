@@ -84,7 +84,7 @@ const itemletImageUrls = [
     color2.getHex(),
   ]
 }); */
-const _averagePoints = (points, target) => {
+/* const _averagePoints = (points, target) => {
   target.copy(points[0]);
   for (let i = 1; i < points.length; i++) {
     target.add(points[i]);
@@ -98,7 +98,7 @@ const _wrapUvs = (geometry, offset, size) => {
       .add(offset)
       .toArray(geometry.attributes.uv.array, i * 2);
   }
-};
+}; */
 function mod(a, n) {
   return (a % n + n) % n;
 }
@@ -336,7 +336,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     // heightfieldRenderTarget.texture.flipY = false;
     // window.heightfieldRenderTarget = heightfieldRenderTarget;
 
-    // XXX debug mehh
+    // debug mesh
     /* {
       const fragmentShader = `\
         uniform sampler2D uHeightfield;

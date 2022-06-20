@@ -752,7 +752,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
     // update functions
 
-    this.updateCoord = (coord, min2xCoord) => {
+    this.updateCoord = (min2xCoord) => {
       const delta = this.heightfieldMapper.updateCoord(min2xCoord, localVector2D);
       
       material.uniforms.uHeightfieldMinPosition.value.copy(this.heightfieldMapper.heightfieldMinPosition);
@@ -1699,8 +1699,8 @@ export default e => {
   chunksMesh.updateMatrixWorld();
 
   const coordupdate = e => {
-    const {coord, min2xCoord} = e.data;
-    chunksMesh.updateCoord(coord, min2xCoord);
+    const {coord} = e.data;
+    chunksMesh.updateCoord(coord);
   };
   tracker.addEventListener('coordupdate', coordupdate);
 

@@ -43,7 +43,6 @@ const maxDrawCallsPerGeometry = 32;
 const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
 const heightfieldBase = new THREE.Vector3(-heightfieldSize / 2, 0, -heightfieldSize / 2);
 const heightfieldBase2D = new THREE.Vector2(heightfieldBase.x, heightfieldBase.z);
-const blankChunkData = new Float32Array(chunkWorldSize * chunkWorldSize);
 
 //
 
@@ -758,11 +757,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       
       material.uniforms.uHeightfieldMinPosition.value.copy(heightfieldMapper.heightfieldMinPosition);
       material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
-      
-      // heightfield fourtap
-      heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.value
-        .copy(heightfieldMapper.heightfieldMinPosition);
-      heightfieldFourTapScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
     
       // displacement animation
       displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.value
@@ -777,51 +771,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       // copy displacement scene
       this.renderDisplacementMapDelta(delta);
     };
-    const heightfieldFourTapScene = (() => {
-      const fullscreenFragmentShader = `\
-        uniform sampler2D uHeightfield;
-        uniform vec2 uHeightfieldBase;
-        uniform vec2 uHeightfieldMinPosition;
-        uniform float uHeightfieldSize;
-        varying vec2 vUv;
-
-        void main() {
-          vec2 pos2D = vUv;
-          vec2 posDiff = pos2D - (uHeightfieldBase + uHeightfieldMinPosition) / uHeightfieldSize;
-          vec2 uvHeightfield = posDiff;
-          uvHeightfield = mod(uvHeightfield, 1.);
-          gl_FragColor = texture2D(uHeightfield, uvHeightfield);
-        }
-      `;
-      const fourTapFullscreenMaterial = new THREE.ShaderMaterial({
-        uniforms: {
-          uHeightfield: {
-            value: heightfieldMapper.heightfieldRenderTarget.texture,
-            needsUpdate: true,
-          },
-          uHeightfieldSize: {
-            value: heightfieldSize,
-            needsUpdate: true,
-          },
-          uHeightfieldBase: {
-            value: heightfieldBase2D,
-            needsUpdate: true,
-          },
-          uHeightfieldMinPosition: {
-            value: new THREE.Vector2(),
-            needsUpdate: true,
-          }
-        },
-        vertexShader: fullscreenVertexShader,
-        fragmentShader: fullscreenFragmentShader,
-      });
-      const fourTapQuadMesh = new THREE.Mesh(fullScreenQuadGeometry, fourTapFullscreenMaterial);
-      fourTapQuadMesh.frustumCulled = false;
-      const scene = new THREE.Scene();
-      scene.add(fourTapQuadMesh);
-      scene.mesh = fourTapQuadMesh;
-      return scene;
-    })();
     const displacementAnimationScene = (() => {
       const heightfieldPlaneGeometry = new THREE.PlaneBufferGeometry(1, 1)
         .rotateX(-Math.PI / 2)
@@ -1258,95 +1207,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       };
       return scene2;
     })();
-    const heightfieldScene = (() => {
-      const chunkPlaneGeometry = new THREE.PlaneBufferGeometry(1, 1)
-        .rotateX(-Math.PI / 2)
-        .translate(0.5, 0, 0.5)
-        .scale(chunkWorldSize, 1, chunkWorldSize);
-      const fullscreenMatrixVertexShader = `\
-        uniform float uHeightfieldSize;  
-        varying vec2 vUv;
-      
-        void main() {
-          vUv = uv;
-          vUv.y = 1. - vUv.y;
-          // vUv += 0.5 / uHeightfieldSize;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `;
-      const fullscreenFragmentShader3 = `\
-        uniform sampler2D uHeightfieldDrawTexture;
-        uniform float uHeightfieldSize;
-        varying vec2 vUv;
-
-        void main() {
-          vec2 uv = vUv;
-          // uv.x += 0.5 / uHeightfieldSize;
-          // uv.y -= 0.5 / uHeightfieldSize;
-          // uv += 0.5 / uHeightfieldSize;
-          float heightValue = texture2D(uHeightfieldDrawTexture, uv).r;
-          
-          gl_FragColor.rgb = vec3(heightValue);
-          gl_FragColor.a = 1.;
-        }
-      `;
-      const heightfieldDrawTexture = new THREE.DataTexture(
-        new Float32Array(chunkWorldSize * chunkWorldSize),
-        chunkWorldSize,
-        chunkWorldSize,
-        THREE.RedFormat,
-        THREE.FloatType
-      );
-      heightfieldDrawTexture.minFilter = THREE.LinearFilter;
-      heightfieldDrawTexture.magFilter = THREE.LinearFilter;
-      const fullscreenMaterial3 = new WebaverseShaderMaterial({
-        uniforms: {
-          uHeightfieldDrawTexture: {
-            value: heightfieldDrawTexture,
-            needsUpdate: true,
-          },
-          uHeightfieldSize: {
-            value: heightfieldSize,
-            needsUpdate: true,
-          },
-        },
-        vertexShader: fullscreenMatrixVertexShader,
-        fragmentShader: fullscreenFragmentShader3,
-        // side: THREE.DoubleSide,
-      });
-      const fullscreenQuadMesh3 = new THREE.Mesh(chunkPlaneGeometry, fullscreenMaterial3);
-      fullscreenQuadMesh3.frustumCulled = false;
-      const scene3 = new THREE.Scene();
-      scene3.add(fullscreenQuadMesh3);
-      scene3.update = (heightfieldLocalWritePosition, heightfield = blankChunkData) => {
-        fullscreenQuadMesh3.position.copy(heightfieldLocalWritePosition);
-        fullscreenQuadMesh3.updateMatrixWorld();
-        
-        // window.fullscreenQuadMesh3 = fullscreenQuadMesh3;
-
-        /* const heightfieldDrawTexture = new THREE.DataTexture(
-          new Uint8ClampedArray(chunkWorldSize * chunkWorldSize),
-          chunkWorldSize,
-          chunkWorldSize,
-          THREE.RedFormat,
-          THREE.UnsignedByteType
-        ); */
-
-        heightfieldDrawTexture.image.data.set(heightfield);
-        heightfieldDrawTexture.needsUpdate = true;
-
-        // fullscreenMaterial3.uniforms.uHeightfieldDrawTexture.value = heightfieldDrawTexture;
-        // fullscreenMaterial3.uniforms.uHeightfieldDrawTexture.needsUpdate = true;
-
-        // console.log('got data', fullscreenQuadMesh3.position.x, fullscreenQuadMesh3.position.z, heightfieldDrawTexture.image.data);
-
-        // console.log('render heightfield', heightfieldLocalWritePosition.x, heightfieldLocalWritePosition.y, heightfield);
-      };
-      scene3.camera = new THREE.OrthographicCamera(0, heightfieldSize, 0, -heightfieldSize, -1000, 1000);
-      scene3.camera.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-      scene3.camera.updateMatrixWorld();
-      return scene3;
-    })();
     this.renderAnimation = () => {
       const renderer = useRenderer();
       const context = renderer.getContext();
@@ -1426,76 +1286,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       const temp = displacementMaps[0];
       displacementMaps[0] = displacementMaps[1];
       displacementMaps[1] = temp;
-    };
-
-    this.renderHeightfieldUpdate = (worldModPosition, heightfield) => {
-      const renderer = useRenderer();
-      const context = renderer.getContext();
-      // const camera = useCamera();
-
-      {
-        // update
-        heightfieldScene.update(worldModPosition, heightfield);
-        
-        // push state
-        const oldRenderTarget = renderer.getRenderTarget();
-        context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
-
-        // render
-        renderer.setRenderTarget(heightfieldMapper.heightfieldRenderTarget);
-        // renderer.clear();
-        renderer.render(heightfieldScene, heightfieldScene.camera);
-
-        // pop state
-        renderer.setRenderTarget(oldRenderTarget);
-        context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
-      }
-    };
-    this.clearHeightfieldChunk = (worldModPosition) => {
-      const renderer = useRenderer();
-      const context = renderer.getContext();
-      // const camera = useCamera();
-
-      {
-        // update
-        heightfieldScene.update(worldModPosition);
-        
-        // push state
-        const oldRenderTarget = renderer.getRenderTarget();
-        context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
-
-        // render
-        renderer.setRenderTarget(heightfieldMapper.heightfieldRenderTarget);
-        // renderer.clear();
-        renderer.render(heightfieldScene, heightfieldScene.camera);
-
-        // pop state
-        renderer.setRenderTarget(oldRenderTarget);
-        context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
-      }
-    };
-    this.updateFourTapHeightfield = () => {
-      const renderer = useRenderer();
-      const context = renderer.getContext();
-      const camera = useCamera();
-
-      {
-        // update
-        // heightfieldFourTapScene.update();
-        
-        // push state
-        const oldRenderTarget = renderer.getRenderTarget();
-        context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
-
-        // render
-        renderer.setRenderTarget(heightfieldMapper.heightfieldFourTapRenderTarget);
-        // renderer.clear();
-        renderer.render(heightfieldFourTapScene, camera);
-
-        // pop state
-        renderer.setRenderTarget(oldRenderTarget);
-        context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
-      }
     };
 
     // this.lastHitTime = -Infinity;
@@ -1587,8 +1377,8 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
           // console.log('render update', position.x, position.y);
 
-          this.renderHeightfieldUpdate(position, heightfield);
-          this.updateFourTapHeightfield();
+          this.heightfieldMapper.renderHeightfieldUpdate(position, heightfield);
+          this.heightfieldMapper.updateFourTapHeightfield();
           
           /* if (position.x < 0 || position.y < 0) {
             debugger;
@@ -1598,8 +1388,8 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
           signal.addEventListener('abort', e => {
             const position = _getWorldModPosition(localVector);
-            this.clearHeightfieldChunk(position);
-            this.updateFourTapHeightfield();
+            this.heightfieldMapper.clearHeightfieldChunk(position);
+            this.heightfieldMapper.updateFourTapHeightfield();
             /* const renderer = useRenderer();
             const heightfieldMin = this.material.uniforms.uHeightfieldPosition.value;
             const chunkPosition = localVector2D2.set(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize);

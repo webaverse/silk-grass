@@ -107,7 +107,7 @@ function mod(a, n) {
 //
 
 const fullScreenQuadGeometry = new THREE.PlaneBufferGeometry(2, 2);
-const fullScreen2xQuadGeometry = (() => {
+/* const fullScreen2xQuadGeometry = (() => {
   // return new THREE.PlaneBufferGeometry(2, 2);
   
   const halfChunkSize = 1 / heightfieldSizeInChunks / 2;
@@ -144,7 +144,7 @@ const fullScreen2xQuadGeometry = (() => {
     .scale(2, 2, 2);
   // window.geometry = geometry;
   return geometry;
-})();
+})(); */
 const fullscreenVertexShader = `\
   varying vec2 vUv;
 

@@ -23,7 +23,6 @@ const chunkWorldSize = 16;
 const heightfieldRange = 2;
 const heightfieldSizeInChunks = heightfieldRange * 2;
 const heightfieldSize = chunkWorldSize * heightfieldSizeInChunks;
-const numLods = 1;
 const maxAnisotropy = 16;
 
 const height = 0.8;

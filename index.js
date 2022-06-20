@@ -11,8 +11,8 @@ const localVector2 = new THREE.Vector3();
 // const localQuaternion = new THREE.Quaternion();
 const localEuler = new THREE.Euler();
 const localVector2D = new THREE.Vector2();
-const localVector2D2 = new THREE.Vector2();
-const localVector2D3 = new THREE.Vector2();
+// const localVector2D2 = new THREE.Vector2();
+// const localVector2D3 = new THREE.Vector2();
 const localBox = new THREE.Box3();
 
 const zeroVector = new THREE.Vector3(0, 0, 0);

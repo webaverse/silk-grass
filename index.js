@@ -1659,6 +1659,7 @@ export default e => {
 
   const seed = app.getComponent('seed') ?? null;
   let range = app.getComponent('range') ?? null;
+  const wait = app.getComponent('wait') ?? false;
   if (range) {
     range = new THREE.Box3(
       new THREE.Vector3(range[0][0], range[0][1], range[0][2]),
@@ -1718,25 +1719,40 @@ export default e => {
   // itemlets support
   // XXX this should be a type of drop in the drop manager
   e.waitUntil((async () => {
-    itemletTextures = await Promise.all(itemletImageUrls.map(url => {
-      return new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = async () => {
-          const imageBitmap = await createImageBitmap(image, {
-            imageOrientation: 'flipY',
+    await Promise.all([
+      (async () => {
+        itemletTextures = await Promise.all(itemletImageUrls.map(url => {
+          return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = async () => {
+              const imageBitmap = await createImageBitmap(image, {
+                imageOrientation: 'flipY',
+              });
+              const texture = new THREE.Texture(imageBitmap);
+              texture.needsUpdate = true;
+              resolve(texture);
+            };
+            image.onerror = err => {
+              console.warn(err);
+              reject(err);
+            };
+            image.crossOrigin = 'Anonymous';
+            image.src = url;
           });
-          const texture = new THREE.Texture(imageBitmap);
-          texture.needsUpdate = true;
-          resolve(texture);
-        };
-        image.onerror = err => {
-          console.warn(err);
-          reject(err);
-        };
-        image.crossOrigin = 'Anonymous';
-        image.src = url;
-      });
-    }));
+        }));
+      })(),
+      (async () => {
+        if (wait) {
+          await new Promise((accept, reject) => {
+            tracker.addEventListener('update', () => {
+              accept();
+            }, {
+              once: true,
+            });
+          });
+        }
+      })(),
+    ]);
   })());
 
   // XXX

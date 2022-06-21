@@ -1681,7 +1681,6 @@ export default e => {
     // trackY: true,
     // relod: true,
   });
-  // tracker.name = 'silk-grass';
   const chunkadd = e => {
     const {chunk} = e.data;
     generator.generateChunk(chunk);
@@ -1692,7 +1691,6 @@ export default e => {
     generator.disposeChunk(chunk);
   };
   tracker.addEventListener('chunkremove', chunkremove);
-  // tracker.emitEvents(chunkadd);
 
   const chunksMesh = generator.getChunks();
   app.add(chunksMesh);
@@ -1705,8 +1703,10 @@ export default e => {
   tracker.addEventListener('coordupdate', coordupdate);
 
   useFrame(({timestamp, timeDiff}) => {
-    const localPlayer = useLocalPlayer();
-    !range && tracker.update(localPlayer.position);
+    if (!range) {
+      const localPlayer = useLocalPlayer();
+      tracker.update(localPlayer.position);
+    }
     generator.update(timestamp, timeDiff);
   });
 

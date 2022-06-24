@@ -287,9 +287,8 @@ const _makeRenderTarget = () => new THREE.WebGLRenderTarget(displacementMapSize,
   stencilBuffer: false,
 });
 const _getHeightfieldChunk = async (procGenInstance, minX, minZ, lod) => {
-  const heightfield = await procGenInstance.dcWorkerManager.getHeightfieldRange(
+  const heightfield = await procGenInstance.dcWorkerManager.getChunkHeightfield(
     minX, minZ,
-    chunkWorldSize, chunkWorldSize,
     lod
   );
   return heightfield;

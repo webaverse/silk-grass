@@ -11,6 +11,8 @@ const localVector2 = new THREE.Vector3();
 // const localQuaternion = new THREE.Quaternion();
 const localEuler = new THREE.Euler();
 const localVector2D = new THREE.Vector2();
+const localVector2D2 = new THREE.Vector2();
+const localVector2D3 = new THREE.Vector2();
 // const localVector2D2 = new THREE.Vector2();
 // const localVector2D3 = new THREE.Vector2();
 const localBox = new THREE.Box3();
@@ -42,7 +44,6 @@ const maxDrawCallsPerGeometry = 32;
 
 const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
 const heightfieldBase = new THREE.Vector3(-heightfieldSize / 2, 0, -heightfieldSize / 2);
-const heightfieldBase2D = new THREE.Vector2(heightfieldBase.x, heightfieldBase.z);
 
 //
 
@@ -286,13 +287,6 @@ const _makeRenderTarget = () => new THREE.WebGLRenderTarget(displacementMapSize,
   wrapT: THREE.ClampToEdgeWrapping,
   stencilBuffer: false,
 });
-const _getHeightfieldChunk = async (procGenInstance, minX, minZ, lod) => {
-  const heightfield = await procGenInstance.dcWorkerManager.getChunkHeightfield(
-    minX, minZ,
-    lod
-  );
-  return heightfield;
-};
 const {InstancedBatchedMesh, InstancedGeometryAllocator} = useInstancing();
 class SilkGrassMesh extends InstancedBatchedMesh {
   constructor({
@@ -377,7 +371,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       uniform float uWindRotation;
       uniform sampler2D uHeightfield;
       uniform sampler2D uHeightfieldFourTap;
-      uniform vec2 uHeightfieldBase;
       uniform vec2 uHeightfieldMinPosition;
       // uniform vec2 uHeightfieldPosition;
       uniform float uChunkSize;
@@ -711,10 +704,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           value: heightfieldMapper.heightfieldFourTapRenderTarget.texture,
           needsUpdate: true,
         },
-        uHeightfieldBase: {
-          value: heightfieldBase2D,
-          needsUpdate: true,
-        },
         /* uHeightfieldPosition: {
           value: new THREE.Vector2(),
           needsUpdate: true,
@@ -751,24 +740,35 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
     // update functions
 
-    this.updateCoord = (min2xCoord) => {
-      const delta = this.heightfieldMapper.updateCoord(min2xCoord, localVector2D);
+    this.updateCoord = (min1xCoord) => {      
+      const oldHeightfieldPosition = localVector2D.copy(this.heightfieldMapper.heightfieldMinPosition);
+      const newHeightfieldPosition = localVector2D2.set(min1xCoord.x, min1xCoord.z)
+        .multiplyScalar(this.chunkSize);
+  
+      const delta = localVector2D3.copy(newHeightfieldPosition)
+        .sub(oldHeightfieldPosition);
+
+      if (!delta.equals(zeroVector)) {
+        // update
+        this.heightfieldMapper.updateCoord(min1xCoord);
+
+        // material
+        material.uniforms.uHeightfieldMinPosition.value.copy(this.heightfieldMapper.heightfieldMinPosition);
+        material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
       
-      material.uniforms.uHeightfieldMinPosition.value.copy(this.heightfieldMapper.heightfieldMinPosition);
-      material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
-    
-      // displacement animation
-      displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.value
-        .copy(this.heightfieldMapper.heightfieldMinPosition);
-      displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
+        // displacement animation
+        displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.value
+          .copy(this.heightfieldMapper.heightfieldMinPosition);
+        displacementAnimationScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
 
-      // cut
-      cutScene.mesh.material.uniforms.uHeightfieldMinPosition.value
-        .copy(this.heightfieldMapper.heightfieldMinPosition);
-      cutScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
+        // cut
+        cutScene.mesh.material.uniforms.uHeightfieldMinPosition.value
+          .copy(this.heightfieldMapper.heightfieldMinPosition);
+        cutScene.mesh.material.uniforms.uHeightfieldMinPosition.needsUpdate = true;
 
-      // copy displacement scene
-      this.renderDisplacementMapDelta(delta);
+        // copy displacement scene
+        this.renderDisplacementMove(delta);
+      }
     };
     const displacementAnimationScene = (() => {
       const heightfieldPlaneGeometry = new THREE.PlaneBufferGeometry(1, 1)
@@ -940,7 +940,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       };
       return scene;
     })();
-    const displacementCopyScene = (() => {
+    const displacementMoveScene = (() => {
       const fullscreenFragmentShader = `\
         uniform vec2 uPositionDelta;
         uniform float uHeightfieldSize;
@@ -1239,14 +1239,14 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
       this.flipRenderTargets();
     };
-    this.renderDisplacementMapDelta = delta => {
+    this.renderDisplacementMove = delta => {
       const renderer = useRenderer();
       const context = renderer.getContext();
       const camera = useCamera();
 
       {
         // update
-        displacementCopyScene.update(delta, displacementMaps[0].texture);
+        displacementMoveScene.update(delta, displacementMaps[0].texture);
 
         // push state
         const oldRenderTarget = renderer.getRenderTarget();
@@ -1255,7 +1255,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         // render
         renderer.setRenderTarget(displacementMaps[1]);
         renderer.clear();
-        renderer.render(displacementCopyScene, camera);
+        renderer.render(displacementMoveScene, camera);
 
         // pop state
         renderer.setRenderTarget(oldRenderTarget);
@@ -1316,96 +1316,100 @@ class SilkGrassMesh extends InstancedBatchedMesh {
   async addChunk(chunk, {
     signal,
   } = {}) {
-    if (chunk.y === 0) {
+    // if (chunk.y === 0) {
       let live = true;
       signal.addEventListener('abort', e => {
         live = false;
       });
 
-      await Promise.all([
-        (async () => {
-          const _getGrassData = async () => {
-            const lod = 1;
-            const result = await this.procGenInstance.dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
-            return result;
-          };
-          const result = await _getGrassData();
-          if (!live) return;
-    
-          const _renderSilksGeometry = (drawCall, ps, qs) => {
-            const pTexture = drawCall.getTexture('p');
-            const pOffset = drawCall.getTextureOffset('p');
-            const qTexture = drawCall.getTexture('q');
-            const qOffset = drawCall.getTextureOffset('q');
-    
-            pTexture.image.data.set(ps, pOffset);
-            qTexture.image.data.set(qs, qOffset);
-    
-            drawCall.updateTexture('p', pOffset, ps.length);
-            drawCall.updateTexture('q', qOffset, qs.length);
-    
-            drawCall.setInstanceCount(ps.length / 3);
-          };
-    
-          localBox.setFromCenterAndSize(
-            localVector.set(
-              (chunk.x + 0.5) * chunkWorldSize,
-              (chunk.y + 0.5) * chunkWorldSize,
-              (chunk.z + 0.5) * chunkWorldSize
-            ),
-            localVector2.set(chunkWorldSize, chunkWorldSize * 10, chunkWorldSize)
-          );
-          const drawCall = this.allocator.allocDrawCall(0, localBox);
-          _renderSilksGeometry(drawCall, result.ps, result.qs);
-    
-          signal.addEventListener('abort', e => {
-            this.allocator.freeDrawCall(drawCall);
-          });
-        })(),
-        (async () => {
-          const lod = 1;
-          const heightfield = await _getHeightfieldChunk(this.procGenInstance, chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
-          if (!live) return;
-          // console.log('got heightfield', chunk.x, chunk.z, heightfield);
-
-          // chunkDataTexture.image.data.set(heightfield);
-
-          // const renderer = useRenderer();
-          // const heightfieldMin = this.material.uniforms.uHeightfieldPosition.value;
-
-          const _getWorldModPosition = target => {
-            target.set(chunk.x * chunkWorldSize, 0, chunk.z * chunkWorldSize)
-              .sub(heightfieldBase);
-            target.x = mod(target.x, this.heightfieldMapper.terrainSize);
-            target.z = mod(target.z, this.heightfieldMapper.terrainSize);
-            return target;
-          };
-          const position = _getWorldModPosition(localVector);
-
-          // console.log('render update', position.x, position.y);
-
-          this.heightfieldMapper.renderHeightfieldUpdate(position, heightfield);
-          this.heightfieldMapper.updateFourTapHeightfield();
-          
-          /* if (position.x < 0 || position.y < 0) {
-            debugger;
-          }
-          // console.log('copy position', position.x, position.y);
-          renderer.copyTextureToTexture(position, chunkDataTexture, this.material.uniforms.uHeightfield.value); */
-
-          signal.addEventListener('abort', e => {
-            const position = _getWorldModPosition(localVector);
-            this.heightfieldMapper.clearHeightfieldChunk(position);
-            this.heightfieldMapper.updateFourTapHeightfield();
-            /* const renderer = useRenderer();
-            const heightfieldMin = this.material.uniforms.uHeightfieldPosition.value;
-            const chunkPosition = localVector2D2.set(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize);
-            const position = localVector2D3.copy(chunkPosition).sub(heightfieldMin);
-            renderer.copyTextureToTexture(position, blankChunkDataTexture, this.material.uniforms.uHeightfield.value); */
-          });
-        })(),
+      const _getGrassData = async () => {
+        const lod = 1;
+        const result = await this.procGenInstance.dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
+        return result;
+      };
+      const _loadHeightfield = async () => {
+        const lod = 1;
+        const heightfield = await this.procGenInstance.dcWorkerManager.getChunkHeightfield(
+          chunk.x * chunkWorldSize,
+          chunk.z * chunkWorldSize,
+          lod
+        );
+        return heightfield;
+      };
+      const [
+        grassData,
+        heightfield,
+      ] = await Promise.all([
+        _getGrassData(),
+        _loadHeightfield(),
       ]);
-    }
+      if (!live) return;
+
+      // grass geometry
+      {
+        const _renderSilksGeometry = (drawCall, ps, qs) => {
+          const pTexture = drawCall.getTexture('p');
+          const pOffset = drawCall.getTextureOffset('p');
+          const qTexture = drawCall.getTexture('q');
+          const qOffset = drawCall.getTextureOffset('q');
+
+          pTexture.image.data.set(ps, pOffset);
+          qTexture.image.data.set(qs, qOffset);
+
+          drawCall.updateTexture('p', pOffset, ps.length);
+          drawCall.updateTexture('q', qOffset, qs.length);
+
+          drawCall.setInstanceCount(ps.length / 3);
+        };
+
+        localBox.setFromCenterAndSize(
+          localVector.set(
+            (chunk.x + 0.5) * chunkWorldSize,
+            (chunk.y + 0.5) * chunkWorldSize,
+            (chunk.z + 0.5) * chunkWorldSize
+          ),
+          localVector2.set(chunkWorldSize, chunkWorldSize * 10, chunkWorldSize)
+        );
+        const drawCall = this.allocator.allocDrawCall(0, localBox);
+        _renderSilksGeometry(drawCall, grassData.ps, grassData.qs);
+
+        signal.addEventListener('abort', e => {
+          this.allocator.freeDrawCall(drawCall);
+        });
+      }
+
+      // heightfield texture
+      {
+        const _getWorldModPosition = target => {
+          target.set(chunk.x * chunkWorldSize, 0, chunk.z * chunkWorldSize)
+            .sub(heightfieldBase);
+          target.x = mod(target.x, this.heightfieldMapper.terrainSize);
+          target.z = mod(target.z, this.heightfieldMapper.terrainSize);
+          return target;
+        };
+        const position = _getWorldModPosition(localVector);
+
+        // console.log('render update', position.x, position.y);
+
+        this.heightfieldMapper.renderHeightfieldUpdate(position, heightfield);
+        this.heightfieldMapper.updateFourTapHeightfield();
+        
+        /* if (position.x < 0 || position.y < 0) {
+          debugger;
+        }
+        // console.log('copy position', position.x, position.y);
+        renderer.copyTextureToTexture(position, chunkDataTexture, this.material.uniforms.uHeightfield.value); */
+
+        signal.addEventListener('abort', e => {
+          // console.log('abort stack', new Error().stack);
+          const position = _getWorldModPosition(localVector);
+          this.heightfieldMapper.clearHeightfieldChunk(position);
+          this.heightfieldMapper.updateFourTapHeightfield();
+        });
+      }
+    /* } else {
+      debugger;
+    } */
   }
   update(timestamp, timeDiff) {
     this.renderAnimation();

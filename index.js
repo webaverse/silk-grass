@@ -956,11 +956,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           vec2 uv = pos2D + pd;
           // uv.y = 1. - uv.y;
           // uv = mod(uv, 1.);
-          if (uv.x >= 0. && uv.x <= 1. && uv.y >= 0. && uv.y <= 1.) {
+          // if (uv.x >= 0. && uv.x <= 1. && uv.y >= 0. && uv.y <= 1.) {
             gl_FragColor = texture2D(uDisplacementMap, uv);
-          } else {
+          /* } else {
             gl_FragColor = vec4(0., 0., 0., 0.);
-          }
+          } */
         }
       `;
       const fourTapFullscreenMaterial = new THREE.ShaderMaterial({

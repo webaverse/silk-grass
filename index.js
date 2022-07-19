@@ -40,7 +40,7 @@ const cutHeightOffset = -1;
 const floorLimit = dropItemSize / 2;
 
 const maxInstancesPerDrawCall = numBlades;
-const maxDrawCallsPerGeometry = 32;
+const maxDrawCallsPerGeometry = 1024;
 
 const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
 const heightfieldBase = new THREE.Vector3(-heightfieldSize / 2, 0, -heightfieldSize / 2);

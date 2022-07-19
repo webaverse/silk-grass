@@ -288,7 +288,7 @@ const _makeRenderTarget = () => new THREE.WebGLRenderTarget(displacementMapSize,
   stencilBuffer: false,
 });
 const {InstancedBatchedMesh, InstancedGeometryAllocator} = useInstancing();
-class SilkGrassMesh extends InstancedBatchedMesh {
+class GrassMesh extends InstancedBatchedMesh {
   constructor({
     procGenInstance,
   }) {
@@ -314,7 +314,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     ], {
       maxInstancesPerDrawCall,
       maxDrawCallsPerGeometry,
-      boundingType: 'box',
+      // boundingType: 'box',
     });
     const {geometry, textures: attributeTextures} = allocator;
     for (const k in attributeTextures) {
@@ -372,19 +372,15 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       uniform sampler2D uHeightfield;
       uniform sampler2D uHeightfieldFourTap;
       uniform vec2 uHeightfieldMinPosition;
-      // uniform vec2 uHeightfieldPosition;
       uniform float uChunkSize;
       uniform float uHeightfieldSize;
-      // uniform float uHeightfieldRange;
       attribute int segment;
       varying vec2 vUv;
       varying vec2 vUvNoise;
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
-      // varying vec2 vF;
       varying vec3 vNoise;
-      // varying vec2 vColor;
 
       vec4 quat_from_axis_angle(vec3 axis, float angle) { 
         vec4 qr;
@@ -398,62 +394,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
 
       vec3 rotate_vertex_position(vec3 position, vec4 q) { 
         return position + 2.0 * cross(q.xyz, cross(q.xyz, position) + q.w * position);
-      }
-
-      vec4 fourTapSample(
-        sampler2D atlas,
-        vec2 tileUV,
-        vec2 tileOffset,
-        vec2 tileSize
-      ) {
-        //Initialize accumulators
-        vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
-        float totalWeight = 0.0;
-
-        // tileUV.x += 0.5 / uHeightfieldSize;
-        // tileUV.y -= 0.5 / uHeightfieldSize;
-
-        // centerUv = mod(centerUv, 0.5) * 0.5;
-
-        // tileUV.y = 1. - tileUV.y;
-        // tileOffset.y = 1. - tileOffset.y;
-
-        for (int dx=0; dx<2; ++dx) {
-          for (int dy=0; dy<2; ++dy) {
-            // tileUV += 0.5;
-            // vec2 tileCoord = (tileUV * 0.5 + 0.5 * vec2(dx,dy)) * 2.;
-            vec2 tileCoord = 2.0 * mod(0.5 * (tileUV + vec2(dx,dy)), 1.);
-            // tileUV -= 0.5;
-      
-            //Weight sample based on distance to center
-            float w = pow(min(abs(1.-tileCoord.x), abs(1.-tileCoord.y)) * 2., 100.);
-      
-            //Compute atlas coord
-            vec2 atlasUV = tileOffset + tileSize * tileCoord;
-      
-            //Sample and accumulate
-            // atlasUV += vec2(0.5, 0.5) / (uHeightfieldSize * 2.0);
-            atlasUV.y = 1. - atlasUV.y;
-            // atlasUV += vec2(0.5, -0.5) / (uHeightfieldSize * 2.0);
-            color += w * texture2D(atlas, atlasUV);
-            totalWeight += w;
-          }
-        }
-
-        /* vF = tileUV.xy;
-        if (vF.x >= 0.5) {
-          vF.x = 1.;
-        } else {
-          vF.x = 0.;
-        }
-        if (vF.y >= 0.5) {
-          vF.y = 1.;
-        } else {
-          vF.y = 0.;
-        } */
-      
-        return color / totalWeight;
-        // return vec4(60.);
       }
 
       float offsetHeight(vec3 offset) {
@@ -478,9 +418,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         vec2 tileUv = mod(posDiffMod * 4., 1.);
         vec2 tileOffset = floor(mod(posDiffMod, 1.) * 4.) / 4.;
         vec2 tileSize = vec2(1. / (uHeightfieldSize / uChunkSize * 2.));
-        
-        // float heightfieldValue = fourTapSample(uHeightfieldFourTap, tileUv, tileOffset, tileSize).r;
-        // float heightfieldValue = tileOffset.x * 30. + 60.;
 
         return heightfieldValue;
       }
@@ -491,6 +428,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       const float cutTime = ${cutTime.toFixed(8)};
       const float growTime = ${growTime.toFixed(8)};
       const float cutGrowTime = ${cutGrowTime.toFixed(8)};
+      
       void main() {
         vec3 pos = position;
 
@@ -503,7 +441,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         vec3 p = texture2D(pTexture, pUv).xyz;
         vec4 q = texture2D(qTexture, pUv).xyzw;
 
-        float h = offsetHeight(p);
+        // float h = offsetHeight(p);
 
         // time diff
         vec4 displacementColor = texture2D(uDisplacementMap, vUv);
@@ -567,10 +505,9 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           }
         }
 
-        // instance offset
+        // rotate instance
         {
           pos = rotate_vertex_position(pos, q);
-          pos.xz += p.xz;
         }
 
         // wind
@@ -587,6 +524,11 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           pos += windOffset * 1.;
         }
 
+        // translate instance
+        {
+          pos += p;
+        }
+
         // displacement bend
         if (!isCut) {
           vec4 displacement = texture2D(uDisplacementMap, vUv);
@@ -594,7 +536,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         }
 
         // height offset
-        pos.y += h;
+        // pos.y += h;
 
         // output
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -616,35 +558,7 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       varying vec3 vNormal;
       varying float vTimeDiff;
       varying float vY;
-      // varying vec2 vF;
       varying vec3 vNoise;
-      // varying vec2 vColor;
-      // varying vec2 vUvNoise;
-
-      vec3 hueShift( vec3 color, float hueAdjust ){
-        const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
-        const vec3  kRGBToI      = vec3 (0.596, -0.275, -0.321);
-        const vec3  kRGBToQ      = vec3 (0.212, -0.523, 0.311);
-
-        const vec3  kYIQToR     = vec3 (1.0, 0.956, 0.621);
-        const vec3  kYIQToG     = vec3 (1.0, -0.272, -0.647);
-        const vec3  kYIQToB     = vec3 (1.0, -1.107, 1.704);
-
-        float   YPrime  = dot (color, kRGBToYPrime);
-        float   I       = dot (color, kRGBToI);
-        float   Q       = dot (color, kRGBToQ);
-        float   hue     = atan (Q, I);
-        float   chroma  = sqrt (I * I + Q * Q);
-
-        hue += hueAdjust;
-
-        Q = chroma * sin (hue);
-        I = chroma * cos (hue);
-
-        vec3    yIQ   = vec3 (YPrime, I, Q);
-
-        return vec3( dot (yIQ, kYIQToR), dot (yIQ, kYIQToG), dot (yIQ, kYIQToB) );
-      }
 
       float rand(float n){return fract(sin(n) * 43758.5453123);}
 
@@ -657,12 +571,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         gl_FragColor.rgb = color *
           (0.4 + rand(floor(100. + (vNoise.x + vNoise.y + vNoise.z) * 15.)) * 0.6) *
           (0.2 + vY/height * 0.8);
-        // gl_FragColor.rgb = vec3(0.);
-        // gl_FragColor.rb = vUv;
-        // gl_FragColor.rgb = displacementColor.rgb;
-        // gl_FragColor.rgb = vec3(vF.x, 0., vF.y);
-        // gl_FragColor.rb = vUvNoise;
-        // gl_FragColor.g = 0.;
         gl_FragColor.a = 1.;
       }
     `;
@@ -704,10 +612,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           value: heightfieldMapper.heightfieldFourTapRenderTarget.texture,
           needsUpdate: true,
         },
-        /* uHeightfieldPosition: {
-          value: new THREE.Vector2(),
-          needsUpdate: true,
-        }, */
         uHeightfieldMinPosition: {
           value: new THREE.Vector2(),
           needsUpdate: true,
@@ -720,10 +624,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           value: heightfieldMapper.terrainSize,
           needsUpdate: true,
         },
-        /* uHeightfieldRange: {
-          value: heightfieldRange,
-          needsUpdate: true,
-        }, */
       },
       vertexShader: grassVertexShader,
       fragmentShader: grassFragmentShader,
@@ -790,7 +690,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       `;
       const fullscreenFragmentShader = `\
         uniform vec3 uPlayerPosition;
-        // uniform vec3 uWorldPosition;
         uniform sampler2D uNoiseTexture;
         uniform sampler2D uDisplacementMap;
         uniform vec2 uHeightfieldMinPosition;
@@ -802,7 +701,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         uniform vec3 pB2;
         varying vec2 vUv;
         varying vec3 vPosition;
-        // const float chunkWorldSize = ${chunkWorldSize.toFixed(8)};
         const float learningRate = 0.005;
         const float maxDistance = 0.6;
 
@@ -870,8 +768,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
             -1.,
             newColor.w
           );
-          // gl_FragColor = vec4(vUv.x, 0., vUv.y, 1.);
-          // gl_FragColor = vec4(heightfieldValue, 0., 0., 1.);
         }
       `;
       const fullscreenMaterial = new THREE.ShaderMaterial({
@@ -1001,8 +897,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
         .translate(0.5, 0, 0.5)
         .scale(heightfieldMapper.terrainSize, 1, heightfieldMapper.terrainSize);
       const cutVertexShader = `\
-        // uniform vec2 uHeightfieldMinPosition;
-        // uniform float uHeightfieldSize;
         varying vec2 vUv;
         varying vec3 vPosition;
 
@@ -1072,9 +966,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
           vec3 virtual = vPosition;
           virtual.y += heightfieldValue;
 
-          // vec2 virtualXZ = vec2(vUv.x, vUv.y) * chunkWorldSize;
-          // virtualXZ += uWorldPosition.xz;
-
           vec4 color = texture2D(uDisplacementMap, vUv);
 
           vec2 a = pA1.xz;
@@ -1099,10 +990,6 @@ class SilkGrassMesh extends InstancedBatchedMesh {
       `;
       const fullscreenMaterial2 = new THREE.ShaderMaterial({
         uniforms: {
-          /* uPlayerPosition: {
-            value: new THREE.Vector3(0, 0, 0),
-            needsUpdate: false,
-          }, */
           uWorldPosition: {
             value: new THREE.Vector3(0, 0, 0),
             needsUpdate: true,
@@ -1313,103 +1200,112 @@ class SilkGrassMesh extends InstancedBatchedMesh {
     heightfieldMesh.updateMatrixWorld();
     this.heightfieldMesh = heightfieldMesh; */
   }
-  async addChunk(chunk, {
-    signal,
-  } = {}) {
-    // if (chunk.y === 0) {
-      let live = true;
-      signal.addEventListener('abort', e => {
-        live = false;
-      });
+  drawChunk(chunk, renderData, tracker) {
+    const {
+      grassData,
+      heightfield,
+    } = renderData;
 
-      const _getGrassData = async () => {
-        const lod = 1;
-        const result = await this.procGenInstance.dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
-        return result;
+    // console.log('got render data', renderData);
+
+    // grass geometry
+    {
+      const _renderSilksGeometry = (drawCall, ps, qs) => {
+        const pTexture = drawCall.getTexture('p');
+        const pOffset = drawCall.getTextureOffset('p');
+        const qTexture = drawCall.getTexture('q');
+        const qOffset = drawCall.getTextureOffset('q');
+
+        pTexture.image.data.set(ps, pOffset);
+        qTexture.image.data.set(qs, qOffset);
+
+        drawCall.updateTexture('p', pOffset, ps.length);
+        drawCall.updateTexture('q', qOffset, qs.length);
+
+        drawCall.setInstanceCount(ps.length / 3);
       };
-      const _loadHeightfield = async () => {
-        const lod = 1;
-        const heightfield = await this.procGenInstance.dcWorkerManager.getChunkHeightfield(
-          chunk.x * chunkWorldSize,
-          chunk.z * chunkWorldSize,
-          lod
-        );
-        return heightfield;
-      };
-      const [
-        grassData,
-        heightfield,
-      ] = await Promise.all([
-        _getGrassData(),
-        _loadHeightfield(),
-      ]);
-      if (!live) return;
 
-      // grass geometry
-      {
-        const _renderSilksGeometry = (drawCall, ps, qs) => {
-          const pTexture = drawCall.getTexture('p');
-          const pOffset = drawCall.getTextureOffset('p');
-          const qTexture = drawCall.getTexture('q');
-          const qOffset = drawCall.getTextureOffset('q');
+      localBox.setFromCenterAndSize(
+        localVector.set(
+          (chunk.x + 0.5) * chunkWorldSize,
+          (chunk.y + 0.5) * chunkWorldSize,
+          (chunk.z + 0.5) * chunkWorldSize
+        ),
+        localVector2.set(chunkWorldSize, chunkWorldSize * 10, chunkWorldSize)
+      );
+      const drawCall = this.allocator.allocDrawCall(0, localBox);
+      _renderSilksGeometry(drawCall, grassData.ps, grassData.qs);
 
-          pTexture.image.data.set(ps, pOffset);
-          qTexture.image.data.set(qs, qOffset);
-
-          drawCall.updateTexture('p', pOffset, ps.length);
-          drawCall.updateTexture('q', qOffset, qs.length);
-
-          drawCall.setInstanceCount(ps.length / 3);
-        };
-
-        localBox.setFromCenterAndSize(
-          localVector.set(
-            (chunk.x + 0.5) * chunkWorldSize,
-            (chunk.y + 0.5) * chunkWorldSize,
-            (chunk.z + 0.5) * chunkWorldSize
-          ),
-          localVector2.set(chunkWorldSize, chunkWorldSize * 10, chunkWorldSize)
-        );
-        const drawCall = this.allocator.allocDrawCall(0, localBox);
-        _renderSilksGeometry(drawCall, grassData.ps, grassData.qs);
-
-        signal.addEventListener('abort', e => {
+      const onchunkremove = e => {
+        const {chunk: removeChunk} = e.data;
+        if (chunk.equalsNodeLod(removeChunk)) {
           this.allocator.freeDrawCall(drawCall);
-        });
-      }
-
-      // heightfield texture
-      {
-        const _getWorldModPosition = target => {
-          target.set(chunk.x * chunkWorldSize, 0, chunk.z * chunkWorldSize)
-            .sub(heightfieldBase);
-          target.x = mod(target.x, this.heightfieldMapper.terrainSize);
-          target.z = mod(target.z, this.heightfieldMapper.terrainSize);
-          return target;
-        };
-        const position = _getWorldModPosition(localVector);
-
-        // console.log('render update', position.x, position.y);
-
-        this.heightfieldMapper.renderHeightfieldUpdate(position, heightfield);
-        this.heightfieldMapper.updateFourTapHeightfield();
         
-        /* if (position.x < 0 || position.y < 0) {
-          debugger;
+          tracker.removeEventListener('chunkremove', onchunkremove);
         }
-        // console.log('copy position', position.x, position.y);
-        renderer.copyTextureToTexture(position, chunkDataTexture, this.material.uniforms.uHeightfield.value); */
+      };
+      tracker.addEventListener('chunkremove', onchunkremove);
+    }
 
-        signal.addEventListener('abort', e => {
-          // console.log('abort stack', new Error().stack);
+    // heightfield texture
+    {
+      const _getWorldModPosition = target => {
+        target.set(chunk.x * chunkWorldSize, 0, chunk.z * chunkWorldSize)
+          .sub(heightfieldBase);
+        target.x = mod(target.x, this.heightfieldMapper.terrainSize);
+        target.z = mod(target.z, this.heightfieldMapper.terrainSize);
+        return target;
+      };
+      const position = _getWorldModPosition(localVector);
+
+      // console.log('render update', position.x, position.y);
+
+      this.heightfieldMapper.renderHeightfieldUpdate(position, heightfield);
+      this.heightfieldMapper.updateFourTapHeightfield();
+
+      const onchunkremove = e => {
+        const {chunk: removeChunk} = e.data;
+        if (chunk.equalsNodeLod(removeChunk)) {
           const position = _getWorldModPosition(localVector);
           this.heightfieldMapper.clearHeightfieldChunk(position);
           this.heightfieldMapper.updateFourTapHeightfield();
-        });
-      }
-    /* } else {
-      debugger;
-    } */
+        
+          tracker.removeEventListener('chunkremove', onchunkremove);
+        }
+      };
+      tracker.addEventListener('chunkremove', onchunkremove);
+    }
+  }
+  async addChunk(chunk, {
+    signal,
+  } = {}) {
+    let live = true;
+    signal.addEventListener('abort', e => {
+      live = false;
+    });
+
+    const _getGrassData = async () => {
+      const lod = 1;
+      const result = await this.procGenInstance.dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
+      return result;
+    };
+    const _loadHeightfield = async () => {
+      const lod = 1;
+      const heightfield = await this.procGenInstance.dcWorkerManager.getChunkHeightfield(
+        chunk.x * chunkWorldSize,
+        chunk.z * chunkWorldSize,
+        lod
+      );
+      return heightfield;
+    };
+    const [
+      grassData,
+      heightfield,
+    ] = await Promise.all([
+      _getGrassData(),
+      _loadHeightfield(),
+    ]);
+    if (!live) return;
   }
   update(timestamp, timeDiff) {
     this.renderAnimation();
@@ -1614,7 +1510,7 @@ class GrassChunkGenerator {
   constructor({
     procGenInstance,
   }) {
-    this.mesh = new SilkGrassMesh({
+    this.mesh = new GrassMesh({
       procGenInstance,
     });
   }
@@ -1640,6 +1536,22 @@ class GrassChunkGenerator {
     abortController.abort();
     chunk.binding = null;
   }
+  /* relodChunksTask(task, tracker) {
+    try {
+      let {newNodes, oldNodes, signal} = task;
+
+      const renderDatas = [];
+      signal.throwIfAborted();
+
+      task.commit();
+    } catch (e) {
+      if (err?.isAbortError) {
+        // nothing
+      } else {
+        throw err;
+      }
+    }   
+  } */
   hitAttempt(position, quaternion, target2D) {
     return this.mesh.hitAttempt(position, quaternion, target2D);
   }
@@ -1669,6 +1581,7 @@ export default e => {
       new THREE.Vector3(range[1][0], range[1][1], range[1][2])
     );
   }
+  // const debug = app.getComponent('debug') ?? false;
 
   const procGenInstance = procGenManager.getInstance(seed, range);
 
@@ -1679,13 +1592,16 @@ export default e => {
     chunkWorldSize,
     numLods,
   }); */
-  const numLods = 1;
+  const lods = 1;
+
   const tracker = procGenInstance.getChunkTracker({
-    numLods,
-    // trackY: true,
-    // relod: true,
+    lods,
+    minLodRange: 2,
+    trackY: false,
+    // debug: false,
   });
-  const chunkadd = e => {
+  
+  /* const chunkadd = e => {
     const {chunk} = e.data;
     generator.generateChunk(chunk);
   };
@@ -1694,7 +1610,61 @@ export default e => {
     const {chunk} = e.data;
     generator.disposeChunk(chunk);
   };
-  tracker.addEventListener('chunkremove', chunkremove);
+  tracker.addEventListener('chunkremove', chunkremove); */
+
+  /* const chunkrelod = e => {
+    generator.relodChunksTask(e.data.task, tracker);
+  };
+  tracker.addEventListener('chunkrelod', chunkrelod); */
+
+  const chunkdatarequest = (e) => {
+    const {chunk, waitUntil, signal} = e.data;
+    const {lod} = chunk;
+
+    const loadPromise = (async () => {
+      const _getGrassData = async () => {
+        const result = await procGenInstance.dcWorkerManager.createGrassSplat(
+          chunk.min.x * chunkWorldSize,
+          chunk.min.z * chunkWorldSize,
+          lod
+        );
+        return result;
+      };
+      const _loadHeightfield = async () => {
+        const heightfield = await procGenInstance.dcWorkerManager.getChunkHeightfield(
+          chunk.min.x * chunkWorldSize,
+          chunk.min.z * chunkWorldSize,
+          lod
+        );
+        return heightfield;
+      };
+      const [
+        grassData,
+        heightfield,
+      ] = await Promise.all([
+        _getGrassData(),
+        _loadHeightfield(),
+      ]);
+
+      /* const renderData = await generator.waterMesh.getChunkRenderData(
+        chunk,
+        signal
+      ); */
+      signal.throwIfAborted();
+
+      return {
+        grassData,
+        heightfield,
+      };
+    })();
+    waitUntil(loadPromise);
+  };
+  const chunkadd = (e) => {
+    const {renderData, chunk} = e.data;
+    generator.mesh.drawChunk(chunk, renderData, tracker);
+  };
+  tracker.addEventListener('chunkdatarequest', chunkdatarequest);
+  tracker.addEventListener('chunkadd', chunkadd);
 
   const chunksMesh = generator.getChunks();
   app.add(chunksMesh);

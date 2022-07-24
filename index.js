@@ -8,13 +8,15 @@ const baseUrl = import.meta.url.replace(/(\/)[^\/\\]*$/, '$1');
 const localVector = new THREE.Vector3();
 const localVector2 = new THREE.Vector3();
 // const localVector3 = new THREE.Vector3();
-// const localQuaternion = new THREE.Quaternion();
+const localQuaternion = new THREE.Quaternion();
 const localEuler = new THREE.Euler();
 const localVector2D = new THREE.Vector2();
 const localVector2D2 = new THREE.Vector2();
 const localVector2D3 = new THREE.Vector2();
 // const localVector2D2 = new THREE.Vector2();
 // const localVector2D3 = new THREE.Vector2();
+const localMatrix = new THREE.Matrix4();
+const localMatrix2 = new THREE.Matrix4();
 const localBox = new THREE.Box3();
 
 const zeroVector = new THREE.Vector3(0, 0, 0);
@@ -1656,9 +1658,19 @@ export default e => {
   useFrame(({timestamp, timeDiff}) => {
     if (!range) {
       const localPlayer = useLocalPlayer();
+      localMatrix
+        .copy(localPlayer.matrixWorld)
+        .premultiply(localMatrix2.copy(app.matrixWorld).invert())
+        .decompose(localVector, localQuaternion, localVector2);
 
-      tracker.update(localPlayer.position);
-      heightfieldMapper.update(localPlayer.position);
+      /* console.log(
+        'silk grass update position',
+        localPlayer.position.toArray().join(','),
+        localVector.toArray().join(','),
+        app.position.toArray().join(','),
+      ); */
+      tracker.update(localVector);
+      heightfieldMapper.update(localVector);
     }
     generator.update(timestamp, timeDiff);
   });

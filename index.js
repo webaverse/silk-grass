@@ -43,7 +43,7 @@ const maxInstancesPerDrawCall = numBlades;
 const maxDrawCallsPerGeometry = 1024;
 
 const windRotation = ((Date.now() / 1000) % 1) * Math.PI * 2;
-const heightfieldBase = new THREE.Vector3(-heightfieldSize / 2, 0, -heightfieldSize / 2);
+// const heightfieldBase = new THREE.Vector3(-heightfieldSize / 2, 0, -heightfieldSize / 2);
 
 //
 
@@ -1236,15 +1236,15 @@ class GrassMesh extends InstancedBatchedMesh {
     const drawCall = this.allocator.allocDrawCall(0, localBox);
     _renderSilksGeometry(drawCall, grassData.ps, grassData.qs);
 
-    const onchunkremove = e => {
-      const {chunk: removeChunk} = e.data;
-      if (chunk.equalsNodeLod(removeChunk)) {
+    const onchunkremove = () => {
+      // const {chunk: removeChunk} = e;
+      // if (chunk.equalsNodeLod(removeChunk)) {
         this.allocator.freeDrawCall(drawCall);
       
-        tracker.removeEventListener('chunkremove', onchunkremove);
-      }
+        tracker.offChunkRemove(chunk, onchunkremove);
+      // }
     };
-    tracker.addEventListener('chunkremove', onchunkremove);
+    tracker.onChunkRemove(chunk, onchunkremove);
   }
   async addChunk(chunk, {
     signal,
@@ -1600,7 +1600,7 @@ export default e => {
   tracker.addEventListener('chunkrelod', chunkrelod); */
 
   const chunkdatarequest = (e) => {
-    const {chunk, waitUntil, signal} = e.data;
+    const {chunk, waitUntil, signal} = e;
     const {lod} = chunk;
 
     const loadPromise = (async () => {
@@ -1642,11 +1642,13 @@ export default e => {
     waitUntil(loadPromise);
   };
   const chunkadd = (e) => {
-    const {renderData, chunk} = e.data;
+    const {renderData, chunk} = e;
     generator.mesh.drawChunk(chunk, renderData, tracker);
   };
-  tracker.addEventListener('chunkdatarequest', chunkdatarequest);
-  tracker.addEventListener('chunkadd', chunkadd);
+  tracker.onChunkDataRequest(chunkdatarequest);
+  tracker.onChunkAdd(chunkadd);
+  // tracker.addEventListener('chunkdatarequest', chunkdatarequest);
+  // tracker.addEventListener('chunkadd', chunkadd);
 
   const chunksMesh = generator.getChunks();
   app.add(chunksMesh);

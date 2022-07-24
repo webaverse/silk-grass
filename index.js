@@ -1259,7 +1259,7 @@ class GrassMesh extends InstancedBatchedMesh {
       const result = await this.procGenInstance.dcWorkerManager.createGrassSplat(chunk.x * chunkWorldSize, chunk.z * chunkWorldSize, lod);
       return result;
     };
-    const _loadHeightfield = async () => {
+    /* const _loadHeightfield = async () => {
       const lod = 1;
       const heightfield = await this.procGenInstance.dcWorkerManager.getChunkHeightfield(
         chunk.x * chunkWorldSize,
@@ -1267,13 +1267,13 @@ class GrassMesh extends InstancedBatchedMesh {
         lod
       );
       return heightfield;
-    };
+    }; */
     const [
       grassData,
-      heightfield,
+      // heightfield,
     ] = await Promise.all([
       _getGrassData(),
-      _loadHeightfield(),
+      // _loadHeightfield(),
     ]);
     if (!live) return;
   }
@@ -1612,20 +1612,20 @@ export default e => {
         );
         return result;
       };
-      const _loadHeightfield = async () => {
+      /* const _loadHeightfield = async () => {
         const heightfield = await procGenInstance.dcWorkerManager.getChunkHeightfield(
           chunk.min.x * chunkWorldSize,
           chunk.min.z * chunkWorldSize,
           lod
         );
         return heightfield;
-      };
+      }; */
       const [
         grassData,
         heightfield,
       ] = await Promise.all([
         _getGrassData(),
-        _loadHeightfield(),
+        // _loadHeightfield(),
       ]);
 
       /* const renderData = await generator.waterMesh.getChunkRenderData(
@@ -1636,7 +1636,7 @@ export default e => {
 
       return {
         grassData,
-        heightfield,
+        // heightfield,
       };
     })();
     waitUntil(loadPromise);

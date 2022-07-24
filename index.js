@@ -603,14 +603,14 @@ class GrassMesh extends InstancedBatchedMesh {
           value: attributeTextures['q'],
           needsUpdate: true,
         },
-        uHeightfield: {
+        /* uHeightfield: {
           value: heightfieldMapper.heightfieldRenderTarget.texture,
           needsUpdate: true,
         },
         uHeightfieldFourTap: {
           value: heightfieldMapper.heightfieldFourTapRenderTarget.texture,
           needsUpdate: true,
-        },
+        }, */
         uHeightfieldMinPosition: {
           value: new THREE.Vector2(),
           needsUpdate: true,

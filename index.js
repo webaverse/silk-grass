@@ -1558,10 +1558,9 @@ export default e => {
   const procGenInstance = procGenManager.getInstance(seed, range);
 
   // heightfield mapper
-  const debug = true;
   const heightfieldMapper = procGenInstance.getHeightfieldMapper({
     size: procGenManager.chunkSize,
-    debug,
+    debug: true,
   });
   app.add(heightfieldMapper.debugMesh);
   heightfieldMapper.debugMesh.updateMatrixWorld();
